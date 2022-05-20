@@ -19,7 +19,7 @@ The manual is available at https://casys-kaist.github.io/pintos-kaist/.
 |날짜|범위| 시간 |
 |:----|:--- |:----|
 |5월20일|반효경 교수님 강의 Introduction~ System Structure & Program Excution 2 Pintos 참고자료 Introduction + Alarm Clock읽기| 오후 11시까지|
-|5월21일|반효경 교수님 강의 Process 1~ Process Management 2| 오후 11시까지 time.c 분석 |
+|5월21일|반효경 교수님 강의 Process 1~ Process Management 2 time.c 분석 | 오후 11시까지 |
 
 
 
