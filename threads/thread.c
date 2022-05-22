@@ -28,6 +28,10 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+static struct list sleep_list;		// SJ
+
+static int64_t next_tick_to_awake;	// SJ, 현재 sleep_list, 즉 대기 중인 '쓰레드'들 중의 wake_tick 변수 중 가장 작은 값을 저장한다.
+												// SJ, 작은 값으로 갱신시킬 것이므로 가장 처음엔 가장 크게 잡아놓아야 갱신이 가능하다.
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -109,6 +113,7 @@ thread_init (void) {
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&destruction_req);
+	list_init (&sleep_list); 		// SJ
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -241,7 +246,7 @@ thread_unblock (struct thread *t) {
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
 	list_push_back (&ready_list, &t->elem);
-	t->status = THREAD_READY;
+	t->status = THREAD_READY;				// SJ, BLOCK임을 확인하고 READY로 바꿔준다.
 	intr_set_level (old_level);
 }
 
@@ -295,7 +300,7 @@ thread_exit (void) {
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
 void
-thread_yield (void) {
+thread_yield (void) {						// SJ, 4 tick(TIME_SLICE)마다 실행된다. 러닝 상태의 쓰레드가 sleep_list로 가게 된다.
 	struct thread *curr = thread_current ();
 	enum intr_level old_level;
 
@@ -307,6 +312,61 @@ thread_yield (void) {
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
+
+void
+thread_sleep (int64_t wakeup_time) {				// SJ, wakeup_time : 쓰레드가 언제 깰 지, 즉 '시각'이다.
+	struct thread *curr = thread_current();
+	enum intr_level old_level;
+	
+	old_level = intr_disable();
+	ASSERT(curr != idle_thread);
+						// SJ, 현재 쓰레드가 idle(빈) 쓰레드가 아닐 경우, idle_thread 구조체는 다 비어있다.
+	// curr->status = THREAD_BLOCKED;				// SJ, 지금 내려올 쓰레드의 상태를 block 상태로 만든다.
+	curr->wake_ticks = wakeup_time;					// SJ, 지금 내려올 쓰레드가 sleep_list에 들어가서, 언제 깰지 갱신한다.
+			// SJ, sleep_list의 tail에 넣는다.
+	update_next_tick_to_awake(curr->wake_ticks);			// SJ, 지금 내려올 쓰레드를 sleep_list에 넣었을 때 sleep_list가 갱신되었기 때문에 제일 작은 wake_ticks가 바뀔 수도 있기 때문에 update를 해줘야 한다.
+	list_push_back(&sleep_list, &curr->elem);
+	
+	do_schedule(THREAD_BLOCKED);
+	thread_block();
+	intr_set_level(old_level);
+	
+	// update_next_tick_to_awake(curr->wake_ticks = wakeup_time);
+	// list_push_back(&sleep_list, &curr->elem);
+	// thread_block();
+	// intr_set_level(old_level);
+}
+
+int64_t
+get_next_tick_to_awake(void) {		// SJ, 지금 현재 sleep_list에서 가장 작은 wake_time을 가진 쓰레드의 wake_time을 가져온다.
+	return next_tick_to_awake;
+}
+
+void
+thread_awake(int64_t ticks) {			// SJ
+	struct list_elem *tmp;	
+	tmp = list_begin(&sleep_list);
+	next_tick_to_awake = INT64_MAX;
+	
+	while(tmp != list_end(&sleep_list)) {
+		struct thread *current_thread = list_entry(tmp, struct thread, elem);
+		
+		if (current_thread->wake_ticks <= ticks) {
+			tmp = list_remove(&current_thread->elem);		// SJ, tmp가 자동으로 다음을 가리키게 된다.
+			thread_unblock(current_thread);			// SJ, BLOCK -> READY
+			
+		} else {
+			tmp = list_next(tmp);
+			update_next_tick_to_awake(current_thread->wake_ticks);
+		}
+	}
+}
+
+void
+update_next_tick_to_awake(int64_t wakeup_time) {		// SJ
+	next_tick_to_awake = (next_tick_to_awake > wakeup_time) ? wakeup_time : next_tick_to_awake;  // SJ, 아직 모름(wake를 고려 안함) 현재 sleep_list에서 가장 작은 wake_tick의 쓰레드의 wakeup_time보다, sleep_list로 들어올 쓰레드의 wake_tick이 더 작다면, 현재 들어올 쓰레드의 wakeup_time으로 갱신한다.
+}
+
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
@@ -534,12 +594,12 @@ do_schedule(int status) {
 			list_entry (list_pop_front (&destruction_req), struct thread, elem);
 		palloc_free_page(victim);
 	}
-	thread_current ()->status = status;
+	thread_current ()->status = status;				// 지금 레디로 갈 놈의 상태를 status로 바꾼다.
 	schedule ();
 }
 
 static void
-schedule (void) {
+schedule (void) {			
 	struct thread *curr = running_thread ();
 	struct thread *next = next_thread_to_run ();
 
@@ -588,3 +648,5 @@ allocate_tid (void) {
 
 	return tid;
 }
+
+

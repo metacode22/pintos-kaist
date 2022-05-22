@@ -91,10 +91,11 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
+	int64_t wake_ticks;						// SJ, 8바이트
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
-
+	
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -142,5 +143,10 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
+
+void thread_sleep (int64_t ticks);				// SJ, 쓰레드를 sleep list에 넣는다. 실행 중인 쓰레드를 sleep으로 만든다.
+void thread_awake (int64_t ticks);				// SJ, sleep_list에서 깨워야할 쓰레드를 깨운다. 즉, sleep_list에서 ready_list로 넣는다.
+void update_next_tick_to_awake (int64_t ticks); // SJ, sleep_list에서 최소 wake_tick을 가진 쓰레드를 저장한다. '재울 때', '깨울 때' update를 하면 된다.
+int64_t get_next_tick_to_awake (void);			// SJ, thread.c의 next_tick_to_awake를 반환한다. 가져온다.
 
 #endif /* threads/thread.h */

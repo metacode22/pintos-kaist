@@ -83,18 +83,19 @@ timer_ticks (void) {
 /* Returns the number of timer ticks elapsed since THEN, which
    should be a value once returned by timer_ticks(). */
 int64_t
-timer_elapsed (int64_t then) {
+timer_elapsed (int64_t then) {					// SJ, 지금 시간에서 경과한 시간을 구해준다.
 	return timer_ticks () - then;
 }
 
 /* Suspends execution for approximately TICKS timer ticks. */
 void
-timer_sleep (int64_t ticks) {
+timer_sleep (int64_t remaining_time) {				// SJ, 쓰레드마다 1번 호출된다. 지금으로부터 몇 ticks 뒤에 깰 것인가. remaining_time : 몇 시간 뒤에 깰지, '시간'이다.
 	int64_t start = timer_ticks ();
 
 	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+	if (timer_elapsed (start) < remaining_time)		// SJ
+		// thread_yield ();					
+		thread_sleep(start + remaining_time);				// SJ, 쓰레드마다 1번 호출된다.
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -124,8 +125,12 @@ timer_print_stats (void) {
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
-	ticks++;
+	ticks++;		// SJ, 매 tick마다 전역 변수인 ticks를 증가시킨다.
 	thread_tick ();
+	
+	if (get_next_tick_to_awake() <= ticks) {
+		thread_awake(ticks);
+	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
