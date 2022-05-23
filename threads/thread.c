@@ -197,7 +197,7 @@ thread_create (const char *name, int priority,
 		return TID_ERROR;
 
 	/* Initialize thread. */
-	init_thread (t, name, priority);
+	init_thread (t, name, priority);						// SJ, 처음 쓰레드의 상태는 Block이다. init_thread 들어가면 block으로 초기화된다.
 	tid = t->tid = allocate_tid ();
 
 	/* Call the kernel_thread if it scheduled.
@@ -212,7 +212,22 @@ thread_create (const char *name, int priority,
 	t->tf.eflags = FLAG_IF;
 
 	/* Add to run queue. */
-	thread_unblock (t);
+	struct thread *current_thread = thread_current();		// SJ
+	
+	if (current_thread != idle_thread) {
+		
+		// 새로 생선된 쓰레드의 우선순위가, 현재 CPU에서 돌고 있는 쓰레드의 우선순위보다 높다면, 새로 생성된 쓰레드가 CPU를 차지한다.
+		if (t->priority > current_thread->priority) {				// SJ, 새로 생선된 쓰레드의 우선순위가, 현재 CPU에서 돌고 있는 쓰레드의 우선순위보다 높다
+			thread_unblock(current_thread);										// SJ, 쓰레드의 상태를 ready로 바꾸고 ready_list로 쓰레드를 넣는다.
+			
+		} else {
+			thread_unblock(t);
+		
+		}
+	}
+
+	
+	
 
 	return tid;
 }
