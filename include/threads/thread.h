@@ -149,4 +149,7 @@ void thread_awake (int64_t ticks);						// SJ, sleep_list에서 깨워야할 쓰
 void update_next_tick_to_awake (int64_t ticks); 		// SJ, sleep_list에서 최소 wake_tick을 가진 쓰레드의 wake_ticks로 갱신한다. 즉, next_tick_to_awake를 갱신한다. '재울 때', '깨울 때' update를 하면 된다.
 int64_t get_next_tick_to_awake (void);					// SJ, next_tick_to_awake 값을 반환한다. 가져온다.
 
+void test_max_priority (void);							// SJ
+bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);	// SJ
+
 #endif /* threads/thread.h */

@@ -11,6 +11,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "list.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -30,6 +31,8 @@ static struct list ready_list;
 
 static struct list sleep_list;												// SJ, 기존 busy waiting 방식은 sleep_list가 없고 ready_list에 넣는 방식이다. 그러면 계속 ready_list에 접근하여 깨어나야 하는 쓰레드가 있는지 확인하게 된다.
 																			// SJ, 이러한 방식은 계속해서 확인해야 하기에 CPU가 낭비될 수 있다. 따라서 sleep_list에 쓰레드를 잠재우고, 나중에 깨우는 방식으로 하면 CPU 낭비를 없앨 수 있다.
+
+list_less_func *less;														// SJ, list_insert_ordered를 위함
 
 static int64_t next_tick_to_awake;											// SJ, 현재 sleep_list, 즉 대기 중인 '쓰레드'들 중의 wake_tick 변수 중 가장 작은 값을 저장하게 된다.
 
@@ -188,6 +191,7 @@ thread_create (const char *name, int priority,
 		thread_func *function, void *aux) {
 	struct thread *t;
 	tid_t tid;
+	enum intr_level old_level;
 
 	ASSERT (function != NULL);
 
@@ -213,22 +217,31 @@ thread_create (const char *name, int priority,
 
 	/* Add to run queue. */
 	struct thread *current_thread = thread_current();		// SJ
-	
-	if (current_thread != idle_thread) {
+
+	old_level = intr_disable ();
+	if (!list_empty(&ready_list)) {
+		list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
+		t->status = THREAD_READY;
 		
 		// 새로 생선된 쓰레드의 우선순위가, 현재 CPU에서 돌고 있는 쓰레드의 우선순위보다 높다면, 새로 생성된 쓰레드가 CPU를 차지한다.
 		if (t->priority > current_thread->priority) {				// SJ, 새로 생선된 쓰레드의 우선순위가, 현재 CPU에서 돌고 있는 쓰레드의 우선순위보다 높다
-			thread_unblock(current_thread);										// SJ, 쓰레드의 상태를 ready로 바꾸고 ready_list로 쓰레드를 넣는다.
+			// t->status = THREAD_READY;
+			// list_push_front(&ready_list, &t->elem);						// SJ
+			thread_yield();											// SJ
 			
-		} else {
-			thread_unblock(t);
+		} 
+		// else {
+		// 	t->status = THREAD_READY;
+		// 	list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
 		
-		}
+		// }
+	} else {
+		t->status = THREAD_READY;
+		list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
+		thread_yield();
 	}
-
+	intr_set_level (old_level);
 	
-	
-
 	return tid;
 }
 
@@ -262,8 +275,9 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
-	t->status = THREAD_READY;				// SJ, BLOCK임을 확인하고 READY로 바꿔준다.
+	// list_push_back (&ready_list, &t->elem); 						// SJ,
+	list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0); 		// SJ
+	t->status = THREAD_READY;										// SJ, BLOCK임을 확인하고 READY로 바꿔준다.
 	intr_set_level (old_level);
 }
 
@@ -314,6 +328,22 @@ thread_exit (void) {
 	NOT_REACHED ();
 }
 
+void test_max_priorty(void) {
+	struct thread *current_thread = thread_current();
+	
+}
+
+bool
+cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+	struct thread *t1 = list_entry(a, struct thread, elem);
+	struct thread *t2 = list_entry(b, struct thread, elem);
+	return t1->priority > t2->priority;
+}
+
+// SJ, 현재 CPU에서 running중인 쓰레드를 ready_list에 넣고, 
+// do schedule, 쓰레드의 상태(CPU에 있던 쓰레드)를 ready 상태로 바꾼다.
+// schedule, ready_list에서 맨 앞의 쓰레드 상태(ready_list에서 ready였던 쓰레드)를 running으로 바꾸고 ready_list에서 맨 앞의 쓰레드를 뽑아서 CPU에 올린다.
+
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
 void
@@ -325,7 +355,7 @@ thread_yield (void) {																			// SJ, 4 tick(TIME_SLICE)마다 실행�
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered(&ready_list, &curr->elem, cmp_priority, 0);								// SJ
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -382,6 +412,8 @@ update_next_tick_to_awake(int64_t wakeup_time) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+	
+	test_max_priority();
 }
 
 /* Returns the current thread's priority. */
