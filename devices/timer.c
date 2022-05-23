@@ -83,19 +83,25 @@ timer_ticks (void) {
 /* Returns the number of timer ticks elapsed since THEN, which
    should be a value once returned by timer_ticks(). */
 int64_t
-timer_elapsed (int64_t then) {					// SJ, 지금 시간에서 경과한 시간을 구해준다.
+timer_elapsed (int64_t then) {								// SJ, 지금 시간에서 경과한 시간을 구해준다.
 	return timer_ticks () - then;
 }
 
 /* Suspends execution for approximately TICKS timer ticks. */
 void
-timer_sleep (int64_t remaining_time) {				// SJ, 쓰레드마다 1번 호출된다. 지금으로부터 몇 ticks 뒤에 깰 것인가. remaining_time : 몇 시간 뒤에 깰지, '시간'이다.
+timer_sleep (int64_t remaining_time) {							// SJ, 쓰레드마다 1번 호출된다. 지금으로부터 몇 ticks 뒤에 깰 것인가. remaining_time : 몇 시간 뒤에 깰지, '시간'이다.
 	int64_t start = timer_ticks ();
 
 	ASSERT (intr_get_level () == INTR_ON);
-	if (timer_elapsed (start) < remaining_time)		// SJ
-		// thread_yield ();					
-		thread_sleep(start + remaining_time);				// SJ, 쓰레드마다 1번 호출된다.
+	
+	/* 기존 busy waiting 방식 - while문에서 경과한 시간이 remaining_time을 지날 때까지, 계속 thread_yield를 호출하게 된다.*/
+	// while (timer_elapsed (start) < remaining_time) {
+	// 	thread_yield ();
+	// }		
+	
+	/* block and wakeup 방식 - 1번만 if 문으로 들어가 thread_sleep하여 현재 쓰레드를 sleep_list에 넣고, 나중에 꺠우기 때문에 CPU가 계속 확인하지 않아도 된다.*/
+	if (timer_elapsed (start) < remaining_time)					// SJ
+		thread_sleep(start + remaining_time);							// SJ, 쓰레드마다 1번 호출된다.
 }
 
 /* Suspends execution for approximately MS milliseconds. */
