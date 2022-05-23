@@ -24,6 +24,10 @@ The manual is available at https://casys-kaist.github.io/pintos-kaist/.
 |5월23일|반효경 교수님 강의 7장 Deadlocks 2 까지 듣고 정리 Project2 Priority Schduleling 읽기 | 오후 6시까지 |
 
 
+![KakaoTalk_Photo_2022-05-24-00-35-40 003](https://user-images.githubusercontent.com/55525574/169855794-9181f8db-25dc-42fa-924a-55a3688d26d2.jpeg)
+![KakaoTalk_Photo_2022-05-24-00-35-40 002](https://user-images.githubusercontent.com/55525574/169855814-724e859a-c6dc-4e13-adac-8e57a1e9e1e8.jpeg)
+![KakaoTalk_Photo_2022-05-24-00-35-40 001](https://user-images.githubusercontent.com/55525574/169855819-917c8cef-7c4e-4248-9c40-8dc7b9b26e94.jpeg)
+
 
 
 
