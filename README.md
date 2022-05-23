@@ -20,7 +20,8 @@ The manual is available at https://casys-kaist.github.io/pintos-kaist/.
 |:----|:--- |:----|
 |5월20일|반효경 교수님 강의 Introduction~ System Structure & Program Excution 2 Pintos 참고자료 Introduction + Alarm Clock읽기| 오후 11시까지|
 |5월21일|반효경 교수님 강의 Process 1~ Process Management 2 time.c 분석 | 오후 11시까지 |
-|5월22일|반효경 교수님 강의 CPU Process Synchronization 1 ~ Process Synchronization 4(Concurrency Control) time.c 분석 | 오후 9시까지 |
+|5월22일|반효경 교수님 강의 CPU Process Synchronization 1 ~ Process Synchronization 4(Concurrency Control) Project1 Alarm Clock 완성 | 오후 9시까지 |
+|5월23일|반효경 교수님 강의 7장 Deadlocks 2 까지 듣고 정리 Project2 Priority Schduleling 읽기 | 오후 6시까지 |
 
 
 
