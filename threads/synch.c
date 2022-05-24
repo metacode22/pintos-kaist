@@ -31,6 +31,7 @@
 #include <string.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "list.h"
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
@@ -41,6 +42,12 @@
 
    - up or "V": increment the value (and wake up one waiting
    thread, if any). */
+
+// struct semaphore {
+// 	unsigned value;             /* Current value. */
+// 	struct list waiters;        /* List of waiting threads. */
+// };
+   
 void
 sema_init (struct semaphore *sema, unsigned value) {
 	ASSERT (sema != NULL);
@@ -58,18 +65,18 @@ sema_init (struct semaphore *sema, unsigned value) {
    thread will probably turn interrupts back on. This is
    sema_down function. */
 void
-sema_down (struct semaphore *sema) {
+sema_down (struct semaphore *sema) {								// SJ, P 연산
 	enum intr_level old_level;
 
 	ASSERT (sema != NULL);
 	ASSERT (!intr_context ());
 
 	old_level = intr_disable ();
-	while (sema->value == 0) {
-		list_push_back (&sema->waiters, &thread_current ()->elem);
-		thread_block ();
+	while (sema->value == 0) {										// SJ, Busy Waiting, 락이 걸려있으면 계속 waiters로 들어간다.
+		list_insert_ordered(&sema->waiters, &thread_current ()->elem, cmp_priority, 0);	// SJ, 공유 메모리로 들어가려는 쓰레드가 CPU에 들어가고 나서 lock이 걸려있다면, waiter로 바로 간다. 
+		thread_block ();											// SJ, 그리고 그 쓰레드의 상태를 BLOCK 만들고, CPU가 놀면 안되므로 다음 ready_list의 쓰레드를 CPU로 올린다.
 	}
-	sema->value--;
+	sema->value--;													// SJ, 락을 얻고 공유 메모리로 들어간다. value는 공유 변수이다.
 	intr_set_level (old_level);
 }
 
