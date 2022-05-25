@@ -72,6 +72,23 @@ sema_init (struct semaphore *sema, unsigned value) {
 	list_init (&sema->waiters);
 }
 
+void
+cond_wait (struct condition *cond, struct lock *lock) {												// SJ, 
+	struct semaphore_elem waiter;
+
+	ASSERT (cond != NULL);
+	ASSERT (lock != NULL);
+	ASSERT (!intr_context ());
+	ASSERT (lock_held_by_current_thread (lock));
+
+	sema_init (&waiter.semaphore, 0);
+	// list_push_back (&cond->waiters, &waiter.elem);
+	list_insert_ordered(&cond->waiters, &waiter.elem, cmp_sem_priority, 0);							// SJ, 그 semaphore_elem의 쓰레드 우선 순위를 따져서 semaphore_elem을 cond의 waiters에 넣어준다.
+	lock_release (lock);
+	sema_down (&waiter.semaphore);
+	lock_acquire (lock);
+}
+
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
    to become positive and then atomically decrements it.
 
@@ -88,7 +105,7 @@ sema_down (struct semaphore *sema) {																// SJ, P 연산.
 	ASSERT (!intr_context ());
 
 	old_level = intr_disable ();
-	while (sema->value == 0) {																		// SJ, Busy Waiting, 락이 걸려있으면 계속 waiters로 들어간다.
+	while (sema->value == 0) {																		// SJ, Busy waiting 방식은 아니다. 바로 ready_list로 들어가지 않는다. 그리고, signal로 인해 ready_list로 갔더라도, value가 0일 수도 있기 때문에(중간에 새로운 우선순위가 더 높은, 같은 세마포어를 얻으려는 쓰레드가 생성되어 ready_list 맨 앞으로 갈 수도 있기 때문이다) 또 다시 waiters로 들어가버릴 수도 있다. 따라서 while문을 사용해야 한다.
 		list_insert_ordered(&sema->waiters, &thread_current ()->elem, cmp_priority, 0);				// SJ, 공유 메모리로 들어가려는 쓰레드가 CPU에 들어가고 나서 lock이 걸려있다면, waiter로 바로 간다. 
 		// list_sort(&sema->waiters, cmp_priority, 0);
 		thread_block ();																			// SJ, 그리고 그 쓰레드의 상태를 BLOCK 만들고, CPU가 놀면 안되므로 다음 ready_list의 쓰레드를 CPU로 올린다.
@@ -133,8 +150,8 @@ sema_up (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
-	if (!list_empty (&sema->waiters)) {
-		list_sort(&sema->waiters, cmp_priority, 0);
+	if (!list_empty (&sema->waiters)) {																// SJ, 리스트가 비어있지 않으면 waiters에 있는 것 1개를 ready_list로 올려야 한다.(signal) 리스가 비어있으면 waiters에서 올릴 것도 없으니 else문에서 무언가 따로 처리해줄 필요가 없다.
+		list_sort(&sema->waiters, cmp_priority, 0);													// SJ, 우선순위가 중간에 바뀔 수 있기 때문에 (테스트 케이스에 존재할 수 있다. 혹은 사용자가 우선순위를 맘대로 바꿀 수도 있으니까) 우선순위를 정렬해줘야 한다.
 		thread_unblock (list_entry (list_pop_front (&sema->waiters),
 					struct thread, elem));
 	}
@@ -211,13 +228,23 @@ lock_init (struct lock *lock) {
    interrupts disabled, but interrupts will be turned back on if
    we need to sleep. */
 void
-lock_acquire (struct lock *lock) {
+lock_acquire (struct lock *lock) {									
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
-	sema_down (&lock->semaphore);
-	lock->holder = thread_current ();
+	struct thread *current_thread = thread_current(); 
+
+	if (lock->holder != NULL) {												// SJ, 현재 쓰레드가 원하는 락을 쥐고 있는 쓰레드가 있으면
+		current_thread->wait_on_lock = lock;								// SJ, 현재 쓰레드가 어떤 락을 기다리고 있는지 기억하게 만든다.
+		list_push_back(&lock->holder->donations, &current_thread->d_elem);	// SJ
+		donate_priority();
+	}
+		
+	sema_down (&lock->semaphore);											// SJ				
+	current_thread->wait_on_lock = NULL;									// SJ
+
+	lock->holder = current_thread;											// SJ
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -239,6 +266,25 @@ lock_try_acquire (struct lock *lock) {
 	return success;
 }
 
+void remove_with_lock(struct lock *lock) {												// SJ
+	struct thread *current_thread = thread_current();
+	struct list_elem *search_thread_elem = list_begin(&current_thread->donations);
+	
+	while (search_thread_elem != list_end(&current_thread->donations)) {
+		struct thread *search_thread = list_entry(search_thread_elem, struct thread, d_elem);
+		
+		if (search_thread->wait_on_lock == lock) {
+			search_thread_elem = list_remove(search_thread_elem);
+		} else {
+			search_thread_elem = list_next(search_thread_elem);
+		}
+	}
+}
+
+void refresh_priority(void) {
+	strcut
+}
+
 /* Releases LOCK, which must be owned by the current thread.
    This is lock_release function.
 
@@ -246,11 +292,15 @@ lock_try_acquire (struct lock *lock) {
    make sense to try to release a lock within an interrupt
    handler. */
 void
-lock_release (struct lock *lock) {
+lock_release (struct lock *lock) {								// SJ
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
 	lock->holder = NULL;
+	
+	remove_with_lock(&lock);
+	refresh_priority();
+	
 	sema_up (&lock->semaphore);
 }
 
@@ -294,22 +344,22 @@ cond_init (struct condition *cond) {
    interrupt handler.  This function may be called with
    interrupts disabled, but interrupts will be turned back on if
    we need to sleep. */
-void
-cond_wait (struct condition *cond, struct lock *lock) {												// SJ, 
-	struct semaphore_elem waiter;
+// void
+// cond_wait (struct condition *cond, struct lock *lock) {												// SJ, 
+// 	struct semaphore_elem waiter;
 
-	ASSERT (cond != NULL);
-	ASSERT (lock != NULL);
-	ASSERT (!intr_context ());
-	ASSERT (lock_held_by_current_thread (lock));
+// 	ASSERT (cond != NULL);
+// 	ASSERT (lock != NULL);
+// 	ASSERT (!intr_context ());
+// 	ASSERT (lock_held_by_current_thread (lock));
 
-	sema_init (&waiter.semaphore, 0);
-	// list_push_back (&cond->waiters, &waiter.elem);
-	list_insert_ordered(&cond->waiters, &waiter.elem, cmp_sem_priority, 0);							// SJ, 그 semaphore_elem의 쓰레드 우선 순위를 따져서 semaphore_elem을 cond의 waiters에 넣어준다.
-	lock_release (lock);
-	sema_down (&waiter.semaphore);
-	lock_acquire (lock);
-}
+// 	sema_init (&waiter.semaphore, 0);
+// 	// list_push_back (&cond->waiters, &waiter.elem);
+// 	list_insert_ordered(&cond->waiters, &waiter.elem, cmp_sem_priority, 0);							// SJ, 그 semaphore_elem의 쓰레드 우선 순위를 따져서 semaphore_elem을 cond의 waiters에 넣어준다.
+// 	lock_release (lock);
+// 	sema_down (&waiter.semaphore);
+// 	lock_acquire (lock);
+// }
 
 /* If any threads are waiting on COND (protected by LOCK), then
    this function signals one of them to wake up from its wait.
