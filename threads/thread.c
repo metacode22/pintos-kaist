@@ -127,6 +127,24 @@ thread_init (void) {
 	initial_thread->tid = allocate_tid ();
 }
 
+void donate_priority(void) {
+	struct thread *current_thread = thread_current();
+	int cnt = 0;
+	struct thread *search_thread = current_thread->wait_on_lock->holder;					// SJ
+	
+	while (cnt < 9) {
+		cnt++;
+		
+		if (search_thread == NULL) {
+			break;
+		}
+		
+		search_thread->init_priority = current_thread->priority;
+		list_insert_ordered(&search_thread->donations, current_thread, cmp_priority, 0);
+		search_thread = search_thread->wait_on_lock->holder;
+	}
+}
+
 /* Starts preemptive thread scheduling by enabling interrupts.
    Also creates the idle thread. */
 void
@@ -237,11 +255,11 @@ thread_create (const char *name, int priority,
 
 	old_level = intr_disable ();							// SJ, 현재 인터럽트 값 저장
 	t->status = THREAD_READY;
-	if (!list_empty(&ready_list)) {							// ready_list가 비어있지 않다면, ready_list에 넣고 yield할지 말지 판단한다.
+	if (!list_empty(&ready_list)) {							// SJ, ready_list가 비어있지 않다면, ready_list에 넣고 yield할지 말지 판단한다.
 		list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
 		test_max_priority();
 		
-	} else {												// ready_list가 비어있다면, ready_list에 넣고 yield하여 CPU에 올라가도록 한다.
+	} else {												// SJ, ready_list가 비어있다면, ready_list에 넣고 yield하여 CPU에 올라가도록 한다.
 		list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
 		thread_yield();
 	}
@@ -503,6 +521,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+	
+	lock_init(t->wait_on_lock);									// SJ
+	t->init_priority = priority;							// SJ
+	list_init(&t->donations);									// SJ
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
