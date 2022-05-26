@@ -127,21 +127,21 @@ thread_init (void) {
 	initial_thread->tid = allocate_tid ();
 }
 
-void donate_priority(void) {
-	struct thread *current_thread = thread_current();
-	int cnt = 0;
-	struct thread *search_thread = current_thread->wait_on_lock->holder;					// SJ
+void donate_priority(void) {													// SJ, 다른 쓰레드가 락을 쥐고 있어서, 그 락을 원하는 현재 쓰레드가 락을 얻지 못할 때, 락을 쥐고 있는 쓰레드에게 우선순위를 기부한다. 이 때 락을 쥐고 있는 쓰레드의 
+	int nested_depth = 0;
+	struct thread* current_thread = thread_current();
+	struct thread* search_thread = current_thread;
 	
-	while (cnt < 9) {
-		cnt++;
+	while (nested_depth != 8) {													// SJ, 핀토스의 nested_depth는 8로 제한되어 있다고 한다.
+		nested_depth--;
 		
-		if (search_thread == NULL) {
+		if (search_thread->wait_on_lock == NULL) {								// SJ, 탐색하고 있는 쓰레드가 더 이상 기다리고 있는 자원이 없다면 우선순위를 기부하는 것이 멈추게 된다.
 			break;
 		}
 		
-		search_thread->init_priority = current_thread->priority;
-		list_insert_ordered(&search_thread->donations, current_thread, cmp_priority, 0);
-		search_thread = search_thread->wait_on_lock->holder;
+		struct thread* next_thread = search_thread->wait_on_lock->holder;		// SJ, 현재 쓰레드의 wait_on_lock 설정은 lock_acquire에서 이미 해주었다.
+		next_thread->priority = search_thread->priority;
+		search_thread = next_thread;
 	}
 }
 
@@ -201,8 +201,10 @@ void test_max_priority(void) {										// SJ, 새로운 쓰레드가 생겨서 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {							// SJ, 현재 CPU를 점유하고 있는 쓰레드의 우선 순위가 바뀐다면 검사해서 yield할지 말지 판단해야한다.
-	thread_current ()->priority = new_priority;						// SJ, 현재 CPU의 우선순위가, ready_list 맨 앞의 쓰레드보다 낮아졌다면 yield가 되어야 할 것이다.
+	thread_current()->priority = new_priority;						// SJ, 현재 CPU의 우선순위가, ready_list 맨 앞의 쓰레드보다 낮아졌다면 yield가 되어야 할 것이다.
+	thread_current()->init_priority = new_priority;						
 	
+	refresh_priority();												// ??					
 	test_max_priority();
 }
 
@@ -358,7 +360,20 @@ cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNU
 	return t1->priority > t2->priority;															// SJ, list_insert_ordered에서 less(elem, e, aux)를 보면, elem이 우리가 넣고자 하는 쓰레드이고, e가 list에 담긴 쓰레드이다.
 }																								// SJ, 만약 리스트 우선순위가 [9 3 1]이고(내림차순으로 정렬되어 있을 것이다) 여기에 7을 넣으려고 한다면 e가 3일 때 t1->priority > t2->priority가 참이 되어 break된다.
 																								// SJ, 그러면 list_insert로 인해 3의 앞으로 7이 찢어서 들어가게 된다.
-																								
+void refresh_priority(){
+	struct thread* current_thread = thread_current();
+	current_thread->priority = current_thread->init_priority;									// SJ, 현재 쓰레드가 락을 반납하면, 현재 쓰레드의 우선순위는 일단 원래 우선순위로 돌아간다. if 문을 충족하지 못한다면 그냥 원래 우선순위로 저장된 그대로 남아있으면 된다.
+	
+	if (!list_empty(&current_thread->donations)) {
+		list_sort(&current_thread->donations, cmp_priority, 0);									// lock_acquire에서 락을 얻지 못한 쓰레드를 donation에 넣어줄 때 이미 list_insert_ordered를 썼기 떄문에 sort를 해주지 않아도 될 것 같지만, 혹시나 몰라서 추가한다. 살제로 해당 코드가 존재하지 않아도 테스트 케이스를 통과한다.
+		struct thread* front_thread = list_entry(list_front(&current_thread->donations), struct thread, donation_elem);
+		
+		if (front_thread->priority > current_thread->priority) {
+			current_thread->priority = front_thread->priority;
+		}
+	}
+}
+																					
 // SJ, 현재 CPU에서 running중인 쓰레드를 ready_list에 넣고, 
 // do schedule, 쓰레드의 상태(CPU에 있던 쓰레드)를 ready 상태로 바꾼다.
 // schedule, ready_list에서 맨 앞의 쓰레드 상태(ready_list에서 ready였던 쓰레드)를 running으로 바꾸고 ready_list에서 맨 앞의 쓰레드를 뽑아서 CPU에 올린다.
@@ -522,9 +537,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
 	
-	lock_init(t->wait_on_lock);									// SJ
-	t->init_priority = priority;							// SJ
-	list_init(&t->donations);									// SJ
+	t->init_priority = priority;				// SJ, 원래 자신의 우선순위로 돌아오려면 원래 자신의 우선순위를 저장해두어야 한다.
+	t->wait_on_lock = NULL;						// SJ, 쓰레드가 기다리는 락은 처음엔 없을 것이다. lock_acquire(lock)을 통해 lock을 얻게 되는데, 이 때 lock을 얻지 못하면 이 쓰레드의 wait_on_lock에 그 lock이 저장된다.
+	list_init(&t->donations);					// SJ, donations을 초기화한다.
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
