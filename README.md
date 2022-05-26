@@ -25,7 +25,7 @@ The manual is available at https://casys-kaist.github.io/pintos-kaist/.
 |5월24일| Priority Scheduling 2-2 Condition variable 까지 완성 | All time |
 |5월25일| Priority Scheduling 2-3 Donation 까지 완성 | All time |
 |5월26일| 1주차 발표 및 Project1 정리, Project2 계획 수립 | All time |
-|5월27일| Project2 전체 Introduction, Agrument Passing(Gitbook, PPT) 공부 및 과제 진행 | All time |
+|5월27일| Project2 전체 Introduction, Agrument Passing(Gitbook, PPT), Test case, 쓰이는 함수 공부 및 과제 진행 memory menagement 첫번째 강의| 오후 7시 30분 |
 
 
 ![KakaoTalk_Photo_2022-05-24-00-35-40 003](https://user-images.githubusercontent.com/55525574/169855794-9181f8db-25dc-42fa-924a-55a3688d26d2.jpeg)
