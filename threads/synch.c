@@ -341,22 +341,6 @@ cond_init (struct condition *cond) {
    interrupt handler.  This function may be called with
    interrupts disabled, but interrupts will be turned back on if
    we need to sleep. */
-// void
-// cond_wait (struct condition *cond, struct lock *lock) {												// SJ, 
-// 	struct semaphore_elem waiter;
-
-// 	ASSERT (cond != NULL);
-// 	ASSERT (lock != NULL);
-// 	ASSERT (!intr_context ());
-// 	ASSERT (lock_held_by_current_thread (lock));
-
-// 	sema_init (&waiter.semaphore, 0);
-// 	// list_push_back (&cond->waiters, &waiter.elem);
-// 	list_insert_ordered(&cond->waiters, &waiter.elem, cmp_sem_priority, 0);							// SJ, 그 semaphore_elem의 쓰레드 우선 순위를 따져서 semaphore_elem을 cond의 waiters에 넣어준다.
-// 	lock_release (lock);
-// 	sema_down (&waiter.semaphore);
-// 	lock_acquire (lock);
-// }
 
 /* If any threads are waiting on COND (protected by LOCK), then
    this function signals one of them to wake up from its wait.
