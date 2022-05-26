@@ -150,9 +150,9 @@ sema_up (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
-	if (!list_empty (&sema->waiters)) {																// SJ, 리스트가 비어있지 않으면 waiters에 있는 것 1개를 ready_list로 올려야 한다.(signal) 리스가 비어있으면 waiters에서 올릴 것도 없으니 else문에서 무언가 따로 처리해줄 필요가 없다.
+	if (!list_empty (&sema->waiters)) {																// SJ, 리스트가 비어있지 않으면 waiters에 있는 것 1개를 ready_list로 올려야 한다.(signal) 리스트가 비어있으면 waiters에서 올릴 것도 없으니 else문에서 무언가 따로 처리해줄 필요가 없다.
 		list_sort(&sema->waiters, cmp_priority, 0);													// SJ, 우선순위가 중간에 바뀔 수 있기 때문에 (테스트 케이스에 존재할 수 있다. 혹은 사용자가 우선순위를 맘대로 바꿀 수도 있으니까) 우선순위를 정렬해줘야 한다.
-		thread_unblock (list_entry (list_pop_front (&sema->waiters),
+		thread_unblock (list_entry (list_pop_front (&sema->waiters),								// SJ, 혹은 lock의 세마포어의 대기자, 즉 lock을 쥐기 위해 기다리는 대기자들의 우선순위를 재정렬해준다. https://sunset-asparagus-5c5.notion.site/Step-3-Priority-Donation-16f26df9f0284a39b3a29849e85eae12 sema_up 수정 부분 참고.
 					struct thread, elem));
 	}
 	sema->value++;
@@ -233,18 +233,20 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
-	struct thread *current_thread = thread_current(); 
+	struct thread* current_thread = thread_current();
 
-	if (lock->holder != NULL) {												// SJ, 현재 쓰레드가 원하는 락을 쥐고 있는 쓰레드가 있으면
-		current_thread->wait_on_lock = lock;								// SJ, 현재 쓰레드가 어떤 락을 기다리고 있는지 기억하게 만든다.
-		list_push_back(&lock->holder->donations, &current_thread->d_elem);	// SJ
-		donate_priority();
+	if (lock->holder != NULL) {																				// SJ, 현재 쓰레드가 원하는 락을 쥐고 있는 쓰레드가 있다면, 그 쓰레드에게 기부하고 그 쓰레드의 donations로 자신이 들어가야 한다.
+		current_thread->wait_on_lock = lock;																// SJ, 현재 쓰레드가 어떤 락을 기다리고 있는지 기억하게 만든다.
+		list_insert_ordered(&lock->holder->donations, &current_thread->donation_elem, cmp_priority, 0);		// SJ, 락을 쥐고 있는 쓰레드의 donation 리스트에 자신을 추가한다.
+		donate_priority();																					// SJ, 현재 쓰레드가 원하는 자원을 빨리 얻어내기 위해, 그 자원을 쓰고 있는 쓰레드들 + 그 쓰레드가 원하는 자원을 쓰고 있는 쓰레드들 등 타고타고 들어가서 우선순위를 기부한다.
 	}
 		
-	sema_down (&lock->semaphore);											// SJ				
-	current_thread->wait_on_lock = NULL;									// SJ
-
-	lock->holder = current_thread;											// SJ
+	sema_down (&lock->semaphore);																			// SJ, 현재 쓰레드가 원하는 락을 쥐고 있는 쓰레드가 없다면, 즉 lock->holder == NULL이라면 sema_down을 통해 그 락(공유될 수 있는 메모리 영역)으로 접근하게 된다.
+	current_thread->wait_on_lock = NULL;																	// SJ, 현재 쓰레드가 원하는 락을 얻고 공유된 메모리로 들어가게 된다면, 그 쓰레드는 원하는 락(기다리는 락)이 없어지게 된다.
+																											// SJ, 위의 sema_donw을 통해 세마포어에 들어가고 난 후이다. 따라서 현재 쓰레드가 원하는 락을 모두 얻었기 떄문에 세마포어에 들어갔다는 것이다.
+																											// SJ, 따라서 현재 쓰레드가 기다리는 락은 NULL이 된다.
+																											
+	lock->holder = current_thread;																			// SJ, 현재 쓰레드가 얻은 락의 주인은 현재 쓰레드가 된다.
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -266,23 +268,17 @@ lock_try_acquire (struct lock *lock) {
 	return success;
 }
 
-void remove_with_lock(struct lock *lock) {												// SJ
-	struct thread *current_thread = thread_current();
-	struct list_elem *search_thread_elem = list_begin(&current_thread->donations);
+void remove_with_lock(struct lock *lock) {												
+	struct thread* current_thread = thread_current();			// SJ, 현재 락을 쥔 쓰레드가 그 락을 반납한다면(현재 락을 쥔 쓰레드가 CPU에 올라갔을 때 lock_release를 실행하게 된다. 그리고 lock_release를 통해 remove_with_lock이 실행된다. 따라서 현재 CPU의 쓰레드의 donations을 탐색해서 그 락이 반납되므로 해방될 노드들을 찾아 해방(제거)시킨다.)
+	struct list_elem* search_thread_elem;
 	
-	while (search_thread_elem != list_end(&current_thread->donations)) {
-		struct thread *search_thread = list_entry(search_thread_elem, struct thread, d_elem);
+	for (search_thread_elem = list_begin(&current_thread->donations); search_thread_elem != list_end(&current_thread->donations); search_thread_elem = list_next(search_thread_elem)) {
+		struct thread* search_thread = list_entry(search_thread_elem, struct thread, donation_elem);		// SJ, donation 관련 작업은 donation_elem을 사용해야 한다.
 		
 		if (search_thread->wait_on_lock == lock) {
-			search_thread_elem = list_remove(search_thread_elem);
-		} else {
-			search_thread_elem = list_next(search_thread_elem);
+			list_remove(&search_thread->donation_elem);		
 		}
 	}
-}
-
-void refresh_priority(void) {
-	strcut
 }
 
 /* Releases LOCK, which must be owned by the current thread.
@@ -292,15 +288,16 @@ void refresh_priority(void) {
    make sense to try to release a lock within an interrupt
    handler. */
 void
-lock_release (struct lock *lock) {								// SJ
+lock_release (struct lock *lock) {								
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
-	lock->holder = NULL;
-	
-	remove_with_lock(&lock);
+	remove_with_lock(lock);										// SJ, 락을 반납했으니, 해당 락을 반납하는 쓰레드의 donations 리스트에서, 해당 락을 기다리는 쓰레드들을 제거한다.(해방한다.)
+																// SJ, 이 쓰레드들은 ready_list에서 계속 락을 못 쥐어서 다시 ready_list로 빠꾸 치고 있다. donations 목록에서 해방되고 락을 쥘 수 있게 되면 자연스럽게 락을 쥘 수 있게 된다. donations 목록에서 제거되지 않더라도 sema_up에서 쥘 수 있게 될 것 같긴 하다. 하지만 우선순위 관리가 되지 않을 것이다. 
+																// SJ, refresh_priority에서 이 donation을 사용하기 떄문에 우선순위 새로고침이 원하는 대로 동작하지 않을 것이다.
 	refresh_priority();
 	
+	lock->holder = NULL;
 	sema_up (&lock->semaphore);
 }
 

@@ -96,6 +96,12 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 	
+	int init_priority;					// SJ, 자원을 모두 반납하고 나면 이전의, 본래 가지고 있던 우선순위로 돌아갈 수 있어야 한다. 따라서 본래의 우선순위를 저장하기 위해 새로운 저장 매체를 만든다.
+	struct lock *wait_on_lock;			// SJ, 이 쓰레드가 원하는 락을, 다른 쓰레드가 이미 점유하고 있어(이 쓰레드의 우선순위가 낮더라도 뺏을 수 없다) 이 쓰레드는 원하는 락을 얻을 수 없다. 이 기다리는 락을 wait_on_lock에 저장한다. 자원을 쥐고 있는 쓰레드가 그 자원을 반납할 때, 그 쓰레드에 줄 서 있는 donation 노드들의 그 자원을 원하는 쓰레드를 찾아서 제거해주기 위해(즉 판별하기 위해) 존재한다. remove_with_lock에서 사용된다.
+	struct list donations;				// SJ, 반대로, 이 쓰레드가 소유한 락을 얻기 위한 쓰레드들은, 자신의 우선순위를 기부하며 이 쓰레드가 빨리 끝나길 바란다. 이 쓰레드를 donations라는 리스트에 저장한다. 이 친구들도 순서가 있다. 우선순위대로 정렬해주어야 한다.
+	struct list_elem donation_elem;		// SJ, 기부한 쓰레드들을 저장하기 위한 노드들이다. 즉 이어주기 위해 존재한다.
+	
+	
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -144,12 +150,11 @@ int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
 
-void thread_sleep (int64_t ticks);						// SJ, 쓰레드를 sleep list에 넣는다. 실행 중인 쓰레드를 sleep으로 만든다.
-void thread_awake (int64_t ticks);						// SJ, sleep_list에서 깨워야할 쓰레드를 깨운다. 즉, sleep_list에서 ready_list로 넣는다.
-void update_next_tick_to_awake (int64_t ticks); 		// SJ, sleep_list에서 최소 wake_tick을 가진 쓰레드의 wake_ticks로 갱신한다. 즉, next_tick_to_awake를 갱신한다. '재울 때', '깨울 때' update를 하면 된다.
-int64_t get_next_tick_to_awake (void);					// SJ, next_tick_to_awake 값을 반환한다. 가져온다.
+void thread_sleep (int64_t ticks);															// SJ, 쓰레드를 sleep list에 넣는다. 실행 중인 쓰레드를 sleep으로 만든다.
+void thread_awake (int64_t ticks);															// SJ, sleep_list에서 깨워야할 쓰레드를 깨운다. 즉, sleep_list에서 ready_list로 넣는다.
+void update_next_tick_to_awake (int64_t ticks); 											// SJ, sleep_list에서 최소 wake_tick을 가진 쓰레드의 wake_ticks로 갱신한다. 즉, next_tick_to_awake를 갱신한다. '재울 때', '깨울 때' update를 하면 된다.
+int64_t get_next_tick_to_awake (void);														// SJ, next_tick_to_awake 값을 반환한다. 가져온다.
 
-void test_max_priority (void);							// SJ
-bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);	// SJ
-
+void test_max_priority (void);																// SJ, 새로운 쓰레드가 생겨서 CPU를 뺏어와야 하거나, 현재 CPU의 우선순위가 바뀌었을 때, ready_list의(이미 우선순위가 높은 것이 앞에 오도록 정렬되어 있다) 가장 앞 쓰레드와 비교하여, 조건 만족 시 yield한다.
+bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);	// SJ, a와 b는, 쓰레드들을 이어줄 수 있게 하는 노드이다. 즉 쓰레드라고 봐도 무방하다. list_entry를 통해 쓰레드를 뽑아낼 수 있다. 쓰레드 a의 우선순위가 쓰레드 b의 우선순위보다 높다면 true를 반환한다.
 #endif /* threads/thread.h */
