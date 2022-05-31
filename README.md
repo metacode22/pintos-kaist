@@ -32,6 +32,7 @@ The manual is available at https://casys-kaist.github.io/pintos-kaist/.
 ![KakaoTalk_Photo_2022-05-24-00-35-40 002](https://user-images.githubusercontent.com/55525574/169855814-724e859a-c6dc-4e13-adac-8e57a1e9e1e8.jpeg)
 ![KakaoTalk_Photo_2022-05-24-00-35-40 001](https://user-images.githubusercontent.com/55525574/169855819-917c8cef-7c4e-4248-9c40-8dc7b9b26e94.jpeg)
 ![KakaoTalk_Photo_2022-05-25-13-24-02 001](https://user-images.githubusercontent.com/55525574/170179460-df978c96-3b3f-4683-857b-0614d45fb303.jpeg)
+![KakaoTalk_Photo_2022-05-31-23-59-17](https://user-images.githubusercontent.com/55525574/171205184-e8b1a9af-460d-45e6-861b-1589ced9c495.jpeg)
 
 
 
