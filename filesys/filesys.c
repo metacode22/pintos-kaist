@@ -96,7 +96,7 @@ filesys_open (const char *name) {
 bool
 filesys_remove (const char *name) {
 	struct dir *dir = dir_open_root ();
-	bool success = dir != NULL && dir_remove (dir, name);
+	bool success = dir != NULL && dir_remove (dir, name);		// SJ, dir가 열리지 않았다면 바로 false가 된다. 즉 dir가 존재하는지 부터 따진다.
 	dir_close (dir);
 
 	return success;

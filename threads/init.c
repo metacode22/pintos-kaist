@@ -74,8 +74,9 @@ main (void) {
 	bss_init ();
 
 	/* Break command line into arguments and parse options. */
-	argv = read_command_line ();
-	argv = parse_options (argv);
+	argv = read_command_line ();								// SJ, 커맨드 라인을 읽어와서 argv에 저장한다.
+																// SJ, pintos -q run 'echo x'라고 커맨드 라인에 입력 시, argv = ["pintos", "-q", "run", "'echo x'", NULL]이 된다.
+	argv = parse_options (argv);								// SJ, "run" 등의 action부터 argv에 다시 넣는다. argv = ["run", "'echo x'", NULL]이 된다.							
 
 	/* Initialize ourselves as a thread so we can use locks,
 	   then enable console locking. */
@@ -119,7 +120,7 @@ main (void) {
 	printf ("Boot complete.\n");
 
 	/* Run actions specified on kernel command line. */
-	run_actions (argv);
+	run_actions (argv);											// SJ, 해당 인자(argv)를 기준으로 함수 run_actions를 실행한다.
 
 	/* Finish up. */
 	if (power_off_when_done)

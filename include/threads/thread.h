@@ -101,6 +101,7 @@ struct thread {
 	struct list donations;				// SJ, 반대로, 이 쓰레드가 소유한 락을 얻기 위한 쓰레드들은, 자신의 우선순위를 기부하며 이 쓰레드가 빨리 끝나길 바란다. 이 쓰레드를 donations라는 리스트에 저장한다. 이 친구들도 순서가 있다. 우선순위대로 정렬해주어야 한다.
 	struct list_elem donation_elem;		// SJ, 기부한 쓰레드들을 저장하기 위한 노드들이다. 즉 이어주기 위해 존재한다.
 	
+	int exit_status;
 	
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */

@@ -26,6 +26,7 @@ static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+void argument_stack(char **argv, int argc, void **rsp);
 
 void argument_stack(char **argv, int argc, void **rsp)
 {
@@ -41,7 +42,7 @@ void argument_stack(char **argv, int argc, void **rsp)
         }
         argv[i] = *(char **)rsp; // 배열에 rsp 주소 넣기
     }
-
+	
     // Word-align padding
     int pad = (int)*rsp % 8;
     for (int k = 0; k < pad; k++)
@@ -59,7 +60,8 @@ void argument_stack(char **argv, int argc, void **rsp)
         (*rsp) -= 8;
         **(char ***)rsp = argv[i];
     }
-
+	// printf("######### rsp: %s", **(char ***)rsp);
+	// printf("######### rsp: %s", **(char ***)rsp);
     // Return address
     (*rsp) -= 8;
     **(void ***)rsp = 0;
@@ -87,6 +89,9 @@ process_create_initd (const char *file_name) {
 	if (fn_copy == NULL)
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
+	
+	// char *save_ptr;
+	// strtok_r(file_name, " ", &save_ptr);
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
@@ -242,7 +247,7 @@ process_exec (void *f_name) {
     _if.R.rdi = argc;
     _if.R.rsi = (uint64_t)*rspp + sizeof(void *);
 
-    hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)*rspp, true);
+    // hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)*rspp, true); 		// SJ, 제대로 파싱 했는지 현 상태를 출력해준다.
 
     palloc_free_page(file_name);
 
@@ -266,9 +271,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	for (int i = 0; i < 10000000; i++) {
-		
-	}
+	// while(1) {};
 	return -1;
 }
 

@@ -34,7 +34,7 @@ struct gp_registers {
 	uint64_t rax;
 } __attribute__((packed));
 
-struct intr_frame {
+struct  intr_frame {
 	/* Pushed by intr_entry in intr-stubs.S.
 	   These are the interrupted task's saved registers. */
 	struct gp_registers R;
