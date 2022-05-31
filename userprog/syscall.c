@@ -82,6 +82,9 @@ syscall_handler (struct intr_frame *f UNUSED) {				// SJ, 시스템 콜이 호�
 		case SYS_WRITE:
 			f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
 			break;
+		case SYS_OPEN:
+			f->R.rax = open(f->R.rdi);
+			break;
 		default:
 			exit(-1);
 			break;
@@ -124,7 +127,8 @@ write (int fd, const void *buffer, unsigned size) {
 	}
 }
 
-int open (const char *file) {		// SJ, 디렉토리를 열어서? 디스크에서? 해당하는 파일을 찾아서, 그 파일만큼 메모리를 할당받고(filesys_open 안의 file_open에서 calloc) 파일 테이블에서 빈 fd에(add_file_to_fd_table) open한 파일을 배정시킨다.
+int 
+open (const char *file) {		// SJ, 디렉토리를 열어서? 디스크에서? 해당하는 파일을 찾아서, 그 파일만큼 메모리를 할당받고(filesys_open 안의 file_open에서 calloc) 파일 테이블에서 빈 fd에(add_file_to_fd_table) open한 파일을 배정시킨다.
 	check_address(file);
 	struct file *file_object = filesys_open(file);			
 	
