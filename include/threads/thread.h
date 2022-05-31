@@ -28,6 +28,12 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+// SJ, file descriptor table 추가
+#define FDT_PAGES 3									// SJ, file descriptor table을 위해 할당 받는 페이지는 총 3개. 왜 그런진 아직 모르겠다.
+#define FDT_COUNT_LIMIT FDT_PAGES * (1 << 9)		// SJ, file descriptor table에 struct file을 가르키는 포인터(8바이트)가 담긴다.
+													// SJ, 페이지 1개는 2^12(4kB)이고 포인터는 8바이트이니 총 2^9개의 포인터를 file descriptor table 1개에 넣을 수 있다.
+													// SJ, 그리고 페이지가 총 3개이니 3 * 2^9개의 포인터를 담을 수 있다.
+
 /* A kernel thread or user process.
  *
  * Each thread structure is stored in its own 4 kB page.  The
@@ -102,6 +108,11 @@ struct thread {
 	struct list_elem donation_elem;		// SJ, 기부한 쓰레드들을 저장하기 위한 노드들이다. 즉 이어주기 위해 존재한다.
 	
 	int exit_status;
+	
+	struct file **fd_table;				// SJ, file descriptor table 선언
+	int fd;								// SJ, file descriptor
+	
+	struct file *running_file;				// SJ, 현재 쓰레드가 사용 중인 파일
 	
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */

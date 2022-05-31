@@ -10,7 +10,6 @@
 #include "include/filesys/filesys.h"
 #include "threads/init.h"
 #include "include/lib/stdio.h"
-#include "stdbool.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -21,6 +20,10 @@ tid_t fork (const char *thread_name, struct intr_frame *f);
 bool create (const char *file, unsigned initial_size);
 bool remove (const char *file);
 int write (int fd, const void *buffer, unsigned size);
+
+int add_file_to_fd_table (struct file *file);
+struct file *get_file_from_fd_table (int fd);
+void close_file_from_fd_table (int fd);
 
 /* System call.
  *
@@ -95,9 +98,9 @@ halt (void) {
           
 void
 exit (int status) {
-    struct thread *cur = thread_current();
-    cur->exit_status = status;                         // 종료시 상태를 확인, 정상종료면 state = 0
-    printf("%s: exit(%d)\n", thread_name(), status); // 종료 메시지 출력
+    struct thread *current_thread = thread_current();
+    current_thread->exit_status = status;                         // 종료시 상태를 확인, 정상종료면 state = 0
+    printf("%s: exit(%d)\n", current_thread->name, status); // 종료 메시지 출력
     thread_exit();   
 }
 
@@ -116,8 +119,66 @@ remove (const char *file) {
 int
 write (int fd, const void *buffer, unsigned size) {
 	if (fd == STDOUT_FILENO) {
-		putbuf(buffer, size);
-		return size;
+		putbuf(buffer, size);		// SJ, console에 대한 lock(console_lock)을 얻고 작업을 마친 후 lock을 해제한다.
+		return size;				// SJ, console에 대한 작업도 겹치면 안되기 때문에 lock을 걸어준다.
 	}
 }
 
+int open (const char *file) {		// SJ, 디렉토리를 열어서? 디스크에서? 해당하는 파일을 찾아서, 그 파일만큼 메모리를 할당받고(filesys_open 안의 file_open에서 calloc) 파일 테이블에서 빈 fd에(add_file_to_fd_table) open한 파일을 배정시킨다.
+	check_address(file);
+	struct file *file_object = filesys_open(file);			
+	
+	if (file_object == NULL) {
+		return -1;
+	}
+	
+	int fd = add_file_to_fd_table(file_object);		// SJ, 해당 프로세스의 fd_table에서 빈 fd를 찾고 file을 배정시킨다.
+	
+	if (fd == -1) {
+		file_close(file_object);					// SJ, inode close하고 file이 할당 받은 메모리를 해제한다.
+	}
+	
+	return fd;										// SJ, 실패했으면 -1을 반환할 것이다.
+}
+
+// SJ, file descriptor table 관련 helper functions
+int 
+add_file_to_fd_table(struct file *file) {
+	struct thread *current_thread = thread_current();
+	struct file **fd_table = current_thread->fd_table;
+	
+	while (current_thread < FDT_COUNT_LIMIT && fd_table[current_thread->fd]) {		// SJ, file descriptor table에 담을 수 있는 총 갯수인 3 * 2^9개보다 작을 동안, 그리고 파일 테이블에서 해당 파일 디스크립터가 이미 배정되어있다면 +1하면서 새로 배정할 곳을 찾아야 할 것이다.
+		current_thread->fd++;														// SJ, 만약 2, 3, 4가 배정되어 있었는데 3이 빠진다면, 새로운 파일을 추가할 때 while문의 2번째 조건으로 인해 while문을 빠져나오고 3에 배정할 것이다.
+	}
+	
+	if (current_thread->fd >= FDT_COUNT_LIMIT) {									// SJ, 테이블이 꽉차 있으면 -1을 반환한다.
+		return -1;																	
+	}
+	
+	fd_table[current_thread->fd] = file;											// SJ, fd_table[current_thread->fd] 이것도 포인터라고 보면 된다.						
+	return current_thread->fd;
+}
+
+struct file *get_file_from_fd_table (int fd) {
+	struct thread *current_thread = thread_current();
+	struct file **fd_table = current_thread->fd_table;
+	
+	if (fd < 0 || fd >= FDT_COUNT_LIMIT) {											// SJ, 사용자 프로그램이 잘못된 fd를 요청하면 NULL을 반환한다.
+		return NULL;
+		
+	} else {
+		return fd_table[fd];														// SJ, struct file을 가르키는 포인터를 반환한다.
+	} 
+}
+
+void close_file_from_fd_table (int fd) {											// SJ, 지금 할당을 해제시키는 것이 아니라, process_exit()할 때 모든 파일들을 할당해제 한다.
+	struct thread *current_thread = thread_current();
+	struct file **fd_table = current_thread->fd_table;
+	
+	if (fd < 0 || fd >= FDT_COUNT_LIMIT) {
+		return;
+		
+	} else {
+		fd_table[fd] = NULL;
+	}																	
+}

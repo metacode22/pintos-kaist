@@ -241,6 +241,19 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);						// SJ, 처음 쓰레드의 상태는 Block이다. init_thread 들어가면 block으로 초기화된다.
 	tid = t->tid = allocate_tid ();
 
+	t->fd_table = palloc_get_multiple(PAL_ZERO, FDT_PAGES); // SJ, 파일 구조체를 가르키는 주소값을 가진 포인터(8byte)를 담을 파일 테이블을 위해 페이지를 할당받는다.
+															// SJ, 이 때 FDT_PAGES는 3이니까 3개의 페이지를 할당받지 않을까? 그리고 주석 설명처럼 연속해서 사용할 수 있는 페이지를 할당받나보다.
+															// SJ, PAL_ZERO라서 페이지를 0으로 초기화한다.
+	if (t->fd_table == NULL) {								// SJ, file descriptor table를 할당받는 데에 실패하면 에러를 반환한다. 할당받을 수 있는 페이지 수가 적으면 NULL 포인터를 반환한다.
+		return TID_ERROR;
+	}
+	
+	// SJ, fd_table[fd] = 우리가 찾고자 하는 파일
+	t->fd = 2;												// SJ, 0은 stdin, 1은 stdout이 이미 할당되어있다고 보아야 한다.
+	t->fd_table[0] = 1;										// SJ, 
+	t->fd_table[1] = 2;
+	
+
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
 	t->tf.rip = (uintptr_t) kernel_thread;
@@ -265,6 +278,9 @@ thread_create (const char *name, int priority,
 		list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
 		thread_yield();
 	}
+	
+	// thread_unblock(current_thread);							// SJ, 현재 쓰레드를 ready 상태로 바꾸고, ready_list에 넣는다.
+	// test_max_priority();									// SJ, ready_list에서 우선순위가 바뀌었을 수도 있으니(CPU에 담긴 것보다 ready_list의 맨 앞 쓰레드의 우선순위가 더 높을 수 있으니(방금 생성된 쓰레드)) 우선순위 비교해서 yield 시켜줘야 한다.
 	intr_set_level (old_level);								// SJ, 인터럽트 원복
 	
 	return tid;
