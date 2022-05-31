@@ -155,6 +155,8 @@ page_fault (struct intr_frame *f) {
 			not_present ? "not present" : "rights violation",
 			write ? "writing" : "reading",
 			user ? "user" : "kernel");
-	kill (f);
+	// kill (f);			// SJ, page fault시 이 kill로 인해 fail 될 수도 있다고 한다.
+	exit(-1);
+	
 }
 
