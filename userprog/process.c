@@ -30,16 +30,6 @@ void argument_stack(char **argv, int argc, void **rsp);
 
 void argument_stack(char **argv, int argc, void **rsp)
 {
-	// printf("######rsp            	%p\n", rsp);
-	// printf("######&rsp           	%p\n", &rsp);
-	// printf("######*rsp              %s\n", *rsp);
-	// printf("######*(char **)rsp     %p\n", *(char **)rsp);
-	// printf("######**(char **)rsp    %s\n", **(char **)rsp);
-	// printf("######**(char ***)rsp   %s\n", **(char ***)rsp);
-	// printf("######***(char ***)rsp  %s\n", ***(char ***)rsp);
-	// printf("###### %s\n", *argv);
-	// printf("###### %s\n", *(argv + 1));
-	
     // Save argument strings (character by character)
     for (int i = argc - 1; i >= 0; i--)
     {
@@ -253,7 +243,7 @@ process_exec (void *f_name) {
 
     // 스택에 인자 넣기
     void **rspp = &_if.rsp;
-    argument_stack(argv, argc, &_if.rsp);
+    argument_stack(argv, argc, rspp);
     _if.R.rdi = argc;
     _if.R.rsi = (uint64_t)*rspp + sizeof(void *);
 

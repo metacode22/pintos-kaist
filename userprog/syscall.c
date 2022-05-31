@@ -85,7 +85,7 @@ syscall_handler (struct intr_frame *f UNUSED) {				// SJ, 시스템 콜이 호�
 	}
 	
 	// printf ("system call!\n");
-	thread_exit ();
+	// thread_exit ();
 }
 
 void 
@@ -95,11 +95,10 @@ halt (void) {
           
 void
 exit (int status) {
-	struct thread *current_thread = thread_current();
-	current_thread->exit_status = status;
-	
-	printf("%s: exit(%s)\n", thread_name(), status);	// SJ, 프로세스 종료 메세지 출력
-	thread_exit();
+    struct thread *cur = thread_current();
+    cur->exit_status = status;                         // 종료시 상태를 확인, 정상종료면 state = 0
+    printf("%s: exit(%d)\n", thread_name(), status); // 종료 메시지 출력
+    thread_exit();   
 }
 
 bool
