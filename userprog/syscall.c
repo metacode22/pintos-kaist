@@ -20,6 +20,12 @@ tid_t fork (const char *thread_name, struct intr_frame *f);
 bool create (const char *file, unsigned initial_size);
 bool remove (const char *file);
 int write (int fd, const void *buffer, unsigned size);
+int open (const char *file);
+int filesize (int fd);
+int read (int fd, void *buffer, unsigned size);
+void seek(int fd, unsigned position);
+unsigned tell (int fd);
+void close (int fd);
 
 int add_file_to_fd_table (struct file *file);
 struct file *get_file_from_fd_table (int fd);
@@ -39,7 +45,7 @@ void close_file_from_fd_table (int fd);
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
 void
-check_address (void *uaddr) {							// SJ, 유저 프로그램이 시스템 콜을 요청할 때 요청한 포인터 인자가 NULL이거나, 커널 공간을 가르키는 포인터이거나, 가상 메모리에 맵핑되어 있지 않다면 프로세스를 종료시킨다.
+check_address (void *uaddr) {											// SJ, 유저 프로그램이 시스템 콜을 요청할 때 요청한 포인터 인자가 NULL이거나, 커널 공간을 가르키는 포인터이거나, 가상 메모리에 맵핑되어 있지 않다면 프로세스를 종료시킨다.
 	struct thread *current_thread = thread_current();
 	
 	if (uaddr == NULL || is_kernel_vaddr(uaddr) || pml4_get_page(current_thread->pml4, uaddr) == NULL) {
@@ -58,13 +64,15 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+			
+	lock_init(&filesys_lock);
 }
 
 /* The main system call interface */
 void
-syscall_handler (struct intr_frame *f UNUSED) {				// SJ, 시스템 콜이 호출되면 시스템 콜 핸들러가 이 시스템 콜을 어떻게 다뤄야 할지 중재한다.
+syscall_handler (struct intr_frame *f UNUSED) {							// SJ, 시스템 콜이 호출되면 시스템 콜 핸들러가 이 시스템 콜을 어떻게 다뤄야 할지 중재한다.
 	// TODO: Your implementation goes here.
-	// int syscall_number = f->R.rax;							// SJ, 사용자 프로그램이 어떤 시스템 콜을 요청한 것인지 확인해야 한다.
+	// int syscall_number = f->R.rax;									// SJ, 사용자 프로그램이 어떤 시스템 콜을 요청한 것인지 확인해야 한다.
 	
 	switch(f->R.rax) {
 		case SYS_HALT:
@@ -82,68 +90,133 @@ syscall_handler (struct intr_frame *f UNUSED) {				// SJ, 시스템 콜이 호�
 		case SYS_WRITE:
 			f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
 			break;
+		case SYS_OPEN:
+			f->R.rax = open(f->R.rdi);
+			break;
+		case SYS_FILESIZE:
+			f->R.rax = filesize(f->R.rdi);
+			break;
+		case SYS_READ:
+			f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
+			break;
+		case SYS_SEEK:
+			seek(f->R.rdi, f->R.rsi);
+			break;
+		case SYS_TELL:
+			f->R.rax = tell(f->R.rdi);
+			break;
+		case SYS_CLOSE:
+			close(f->R.rdi);
+			break;
 		default:
 			exit(-1);
 			break;
 	}
 	
-	// printf ("system call!\n");
-	// thread_exit ();
 }
 
 void 
 halt (void) {
-	power_off();											// SJ, 핀토스 종료
+	power_off();														// SJ, 핀토스 종료
 }
           
 void
 exit (int status) {
     struct thread *current_thread = thread_current();
-    current_thread->exit_status = status;                         // 종료시 상태를 확인, 정상종료면 state = 0
-    printf("%s: exit(%d)\n", current_thread->name, status); // 종료 메시지 출력
+    current_thread->exit_status = status;                         		// SJ, 종료시 상태를 확인, 정상종료면 state = 0
+    printf("%s: exit(%d)\n", current_thread->name, status); 			// SJ, 종료 메시지 출력
     thread_exit();   
 }
 
 bool
 create (const char *file, unsigned initial_size) {
 	check_address(file);
-	return filesys_create(file, initial_size);				// SJ, file 생성 성공 시 true를 반환한다.
+	
+	lock_acquire(&filesys_lock);
+	bool result = filesys_create(file, initial_size);
+	lock_release(&filesys_lock);
+	
+	return result;														// SJ, file 생성 성공 시 true를 반환한다.
 }
 
 bool
 remove (const char *file) {
 	check_address(file);
-	return filesys_remove(file);							// SJ, file 제거 성공 시 true를 반환한다.
+	
+	lock_acquire(&filesys_lock);
+	bool result = filesys_remove(file);
+	lock_release(&filesys_lock);
+	
+	return result;														// SJ, file 제거 성공 시 true를 반환한다.
+}
+
+int 
+open (const char *file) {												// SJ, 디렉토리를 열어서? 디스크에서? 해당하는 파일을 찾아서, 그 파일만큼 메모리를 할당받고(filesys_open 안의 file_open에서 calloc) 파일 테이블에서 빈 fd에(add_file_to_fd_table) open한 파일을 배정시킨다.
+	check_address(file);
+	struct file *file_object = filesys_open(file);	
+			
+	lock_acquire(&filesys_lock);
+	if (file_object == NULL) {
+		return -1;
+	}
+	
+	int fd = add_file_to_fd_table(file_object);							// SJ, 해당 프로세스의 fd_table에서 빈 fd를 찾고 file을 배정시킨다. 프로세스(쓰레드)는 이 파일을 이용할 수 있게 된다.
+	
+	if (fd == -1) {
+		file_close(file_object);										// SJ, inode close하고 file이 할당 받은 메모리를 해제한다.
+	}
+	lock_release(&filesys_lock);
+	
+	return fd;															// SJ, 실패했으면 -1을 반환할 것이다.
+}
+
+int	
+filesize (int fd) {														// SJ, 파일의 사이즈를 반환한다. off_t가 int32_t니까 filesize가 1이면 4바이트일 것 같다.
+	struct file *file = get_file_from_fd_table(fd);
+	
+	if (file == NULL) {
+		return -1;
+	}
+	
+	off_t file_size = file_length(file);
+	return file_size;
+}
+
+int
+read (int fd, void *buffer, unsigned size) {
+	lock_acquire(&filesys_lock);
+	struct file *file = get_file_from_fd_table(fd);
+	
+	lock_release(&filesys_lock);
+	return;
 }
 
 int
 write (int fd, const void *buffer, unsigned size) {
 	if (fd == STDOUT_FILENO) {
-		putbuf(buffer, size);		// SJ, console에 대한 lock(console_lock)을 얻고 작업을 마친 후 lock을 해제한다.
-		return size;				// SJ, console에 대한 작업도 겹치면 안되기 때문에 lock을 걸어준다.
+		putbuf(buffer, size);											// SJ, console에 대한 lock(console_lock)을 얻고 작업을 마친 후 lock을 해제한다.
+		return size;													// SJ, console에 대한 작업도 겹치면 안되기 때문에 lock을 걸어준다.
 	}
 }
 
-int open (const char *file) {		// SJ, 디렉토리를 열어서? 디스크에서? 해당하는 파일을 찾아서, 그 파일만큼 메모리를 할당받고(filesys_open 안의 file_open에서 calloc) 파일 테이블에서 빈 fd에(add_file_to_fd_table) open한 파일을 배정시킨다.
-	check_address(file);
-	struct file *file_object = filesys_open(file);			
+void 
+seek(int fd, unsigned position) {
 	
-	if (file_object == NULL) {
-		return -1;
-	}
+}
+
+unsigned
+tell (int fd) {
 	
-	int fd = add_file_to_fd_table(file_object);		// SJ, 해당 프로세스의 fd_table에서 빈 fd를 찾고 file을 배정시킨다.
+}
+
+void
+close (int fd) {
 	
-	if (fd == -1) {
-		file_close(file_object);					// SJ, inode close하고 file이 할당 받은 메모리를 해제한다.
-	}
-	
-	return fd;										// SJ, 실패했으면 -1을 반환할 것이다.
 }
 
 // SJ, file descriptor table 관련 helper functions
 int 
-add_file_to_fd_table(struct file *file) {
+add_file_to_fd_table (struct file *file) {
 	struct thread *current_thread = thread_current();
 	struct file **fd_table = current_thread->fd_table;
 	

@@ -2,6 +2,9 @@
 #define USERPROG_SYSCALL_H
 #include <stdbool.h>
 #include <include/threads/thread.h>
+#include <include/threads/synch.h>
+
+struct lock filesys_lock;
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
