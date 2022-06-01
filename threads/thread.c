@@ -250,8 +250,8 @@ thread_create (const char *name, int priority,
 	
 	// SJ, fd_table[fd] = 우리가 찾고자 하는 파일
 	t->fd = 2;												// SJ, 0은 stdin, 1은 stdout이 이미 할당되어있다고 보아야 한다.
-	t->fd_table[0] = 1;										// SJ, 
-	t->fd_table[1] = 2;
+	t->fd_table[0] = 1;										// SJ, Dummy Value
+	t->fd_table[1] = 2;										// SJ, Dummy Value
 	
 
 	/* Call the kernel_thread if it scheduled.

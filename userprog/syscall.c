@@ -22,6 +22,10 @@ bool remove (const char *file);
 int write (int fd, const void *buffer, unsigned size);
 int open (const char *file);
 int filesize (int fd);
+int read (int fd, void *buffer, unsigned size);
+void seek(int fd, unsigned position);
+unsigned tell (int fd);
+void close (int fd);
 
 int add_file_to_fd_table (struct file *file);
 struct file *get_file_from_fd_table (int fd);
@@ -92,13 +96,23 @@ syscall_handler (struct intr_frame *f UNUSED) {							// SJ, 시스템 콜이 �
 		case SYS_FILESIZE:
 			f->R.rax = filesize(f->R.rdi);
 			break;
+		case SYS_READ:
+			f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
+			break;
+		case SYS_SEEK:
+			seek(f->R.rdi, f->R.rsi);
+			break;
+		case SYS_TELL:
+			f->R.rax = tell(f->R.rdi);
+			break;
+		case SYS_CLOSE:
+			close(f->R.rdi);
+			break;
 		default:
 			exit(-1);
 			break;
 	}
 	
-	// printf ("system call!\n");
-	// thread_exit ();
 }
 
 void 
@@ -136,26 +150,17 @@ remove (const char *file) {
 	return result;														// SJ, file 제거 성공 시 true를 반환한다.
 }
 
-int
-write (int fd, const void *buffer, unsigned size) {
-	if (fd == STDOUT_FILENO) {
-		putbuf(buffer, size);											// SJ, console에 대한 lock(console_lock)을 얻고 작업을 마친 후 lock을 해제한다.
-		return size;													// SJ, console에 대한 작업도 겹치면 안되기 때문에 lock을 걸어준다.
-	}
-}
-
 int 
 open (const char *file) {												// SJ, 디렉토리를 열어서? 디스크에서? 해당하는 파일을 찾아서, 그 파일만큼 메모리를 할당받고(filesys_open 안의 file_open에서 calloc) 파일 테이블에서 빈 fd에(add_file_to_fd_table) open한 파일을 배정시킨다.
 	check_address(file);
-	
+	struct file *file_object = filesys_open(file);	
+			
 	lock_acquire(&filesys_lock);
-	struct file *file_object = filesys_open(file);			
-	
 	if (file_object == NULL) {
 		return -1;
 	}
 	
-	int fd = add_file_to_fd_table(file_object);							// SJ, 해당 프로세스의 fd_table에서 빈 fd를 찾고 file을 배정시킨다.
+	int fd = add_file_to_fd_table(file_object);							// SJ, 해당 프로세스의 fd_table에서 빈 fd를 찾고 file을 배정시킨다. 프로세스(쓰레드)는 이 파일을 이용할 수 있게 된다.
 	
 	if (fd == -1) {
 		file_close(file_object);										// SJ, inode close하고 file이 할당 받은 메모리를 해제한다.
@@ -177,9 +182,41 @@ filesize (int fd) {														// SJ, 파일의 사이즈를 반환한다. off
 	return file_size;
 }
 
+int
+read (int fd, void *buffer, unsigned size) {
+	lock_acquire(&filesys_lock);
+	struct file *file = get_file_from_fd_table(fd);
+	
+	lock_release(&filesys_lock);
+	return;
+}
+
+int
+write (int fd, const void *buffer, unsigned size) {
+	if (fd == STDOUT_FILENO) {
+		putbuf(buffer, size);											// SJ, console에 대한 lock(console_lock)을 얻고 작업을 마친 후 lock을 해제한다.
+		return size;													// SJ, console에 대한 작업도 겹치면 안되기 때문에 lock을 걸어준다.
+	}
+}
+
+void 
+seek(int fd, unsigned position) {
+	
+}
+
+unsigned
+tell (int fd) {
+	
+}
+
+void
+close (int fd) {
+	
+}
+
 // SJ, file descriptor table 관련 helper functions
 int 
-add_file_to_fd_table(struct file *file) {
+add_file_to_fd_table (struct file *file) {
 	struct thread *current_thread = thread_current();
 	struct file **fd_table = current_thread->fd_table;
 	
