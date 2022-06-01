@@ -20,6 +20,8 @@ tid_t fork (const char *thread_name, struct intr_frame *f);
 bool create (const char *file, unsigned initial_size);
 bool remove (const char *file);
 int write (int fd, const void *buffer, unsigned size);
+int open (const char *file);
+int filesize (int fd);
 
 int add_file_to_fd_table (struct file *file);
 struct file *get_file_from_fd_table (int fd);
@@ -58,6 +60,8 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+			
+	lock_init(&filesys_lock);
 }
 
 /* The main system call interface */
@@ -85,6 +89,9 @@ syscall_handler (struct intr_frame *f UNUSED) {							// SJ, 시스템 콜이 �
 		case SYS_OPEN:
 			f->R.rax = open(f->R.rdi);
 			break;
+		case SYS_FILESIZE:
+			f->R.rax = filesize(f->R.rdi);
+			break;
 		default:
 			exit(-1);
 			break;
@@ -110,13 +117,23 @@ exit (int status) {
 bool
 create (const char *file, unsigned initial_size) {
 	check_address(file);
-	return filesys_create(file, initial_size);							// SJ, file 생성 성공 시 true를 반환한다.
+	
+	lock_acquire(&filesys_lock);
+	bool result = filesys_create(file, initial_size);
+	lock_release(&filesys_lock);
+	
+	return result;														// SJ, file 생성 성공 시 true를 반환한다.
 }
 
 bool
 remove (const char *file) {
 	check_address(file);
-	return filesys_remove(file);										// SJ, file 제거 성공 시 true를 반환한다.
+	
+	lock_acquire(&filesys_lock);
+	bool result = filesys_remove(file);
+	lock_release(&filesys_lock);
+	
+	return result;														// SJ, file 제거 성공 시 true를 반환한다.
 }
 
 int
@@ -130,6 +147,8 @@ write (int fd, const void *buffer, unsigned size) {
 int 
 open (const char *file) {												// SJ, 디렉토리를 열어서? 디스크에서? 해당하는 파일을 찾아서, 그 파일만큼 메모리를 할당받고(filesys_open 안의 file_open에서 calloc) 파일 테이블에서 빈 fd에(add_file_to_fd_table) open한 파일을 배정시킨다.
 	check_address(file);
+	
+	lock_acquire(&filesys_lock);
 	struct file *file_object = filesys_open(file);			
 	
 	if (file_object == NULL) {
@@ -141,8 +160,21 @@ open (const char *file) {												// SJ, 디렉토리를 열어서? 디스크
 	if (fd == -1) {
 		file_close(file_object);										// SJ, inode close하고 file이 할당 받은 메모리를 해제한다.
 	}
+	lock_release(&filesys_lock);
 	
 	return fd;															// SJ, 실패했으면 -1을 반환할 것이다.
+}
+
+int	
+filesize (int fd) {														// SJ, 파일의 사이즈를 반환한다. off_t가 int32_t니까 filesize가 1이면 4바이트일 것 같다.
+	struct file *file = get_file_from_fd_table(fd);
+	
+	if (file == NULL) {
+		return -1;
+	}
+	
+	off_t file_size = file_length(file);
+	return file_size;
 }
 
 // SJ, file descriptor table 관련 helper functions
