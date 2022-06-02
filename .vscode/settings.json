@@ -8,6 +8,7 @@
         "malloc.h": "c",
         "stdio.h": "c",
         "stdbool.h": "c",
-        "*.inc": "c"
+        "*.inc": "c",
+        "lib.h": "c"
     }
 }
