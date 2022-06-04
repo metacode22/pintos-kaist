@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "include/userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -27,6 +28,7 @@ static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 void argument_stack(char **argv, int argc, void **rsp);
+struct thread *get_child_with_tid(int tid);
 
 void argument_stack(char **argv, int argc, void **rsp)
 {
@@ -117,10 +119,24 @@ initd (void *f_name) {
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
 tid_t
-process_fork (const char *name, struct intr_frame *if_ UNUSED) {
+process_fork (const char *name, struct intr_frame *if_ UNUSED) {					// SJ, UNUSED는 사용되지 않을 수도 있다는 뜻이다.
 	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+	struct thread *parent_thread = thread_current();
+	memcpy(&parent_thread->parent_if, if_, sizeof(struct intr_frame));				// SJ, 왜 부모의 부모 인터럽트 프레임에 자기 자신을 또 넣는거지? 그냥 자신의 tf를 쓰면 되는 것 아닌가? 왜 이러한 과정이 들어가 있는거지?				
+																					// SJ, 만약 인터럽트 프레임을 그대로 넘기면, 포인터이기 때문에 서로 한 인터럽트 프레임을 공유하게 된다.
+																					// SJ, 그 의미는, 자식이 생겨나면 그 자식 나름대로 코드가 다를 수 있기 때문에 인터럽트 프레임에 담기는 내용도 부모와 다를 수도 있다.
+																					// SJ, 이렇게 카피를 하지 않으면 부모와 자식 모두 같은 인터럽트 프레임을 사용하게 되는 것이다.라고 추측 중
+																					
+	tid_t tid = thread_create(name, parent_thread->priority, __do_fork, parent_thread);
+	
+	if (tid == TID_ERROR) {															// SJ, thread_create에서 fd table 할당에 실패하면 -1(TID_ERROR)을 반환한다.
+		return TID_ERROR;
+	}
+	
+	struct thread *child_thread = get_child_with_tid(tid);							// SJ, tid를 통해 만들어진 자식 프로세스를 가지고 온다.
+	sema_down(&child_thread->fork_sema);											// SJ, 자식 프로세스가 정상적으로 생성되기 위한 것이다.											
+	
+	return tid;
 }
 
 #ifndef VM
@@ -135,21 +151,36 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+	if (is_kernel_vaddr(va)) {															// SJ, 커널 공간의 경우 모든 프로세스가 동일한 주소 공간을 공유하기 때문에 따로 복사할 필요가 없다.
+		return true;
+	}
 
 	/* 2. Resolve VA from the parent's page map level 4. */
-	parent_page = pml4_get_page (parent->pml4, va);
+	parent_page = pml4_get_page (parent->pml4, va);										// SJ, 부모의 va에 해당하는 실제 물리 메모리 주소를 parent->pml4에서 찾아온다.
+	if (parent_page == NULL) {
+		return false;
+	}
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
-
+	newpage = palloc_get_page(PAL_USER);												// SJ, 사용자 물리 메모리에서 새로운 페이지를 할당받는다. 여기에다가 부모의 페이지를 그대로 복사하면 된다.
+	if (newpage == NULL) {
+		// printf("[fork-duplicate] failed to palloc new page\n");
+		return false;
+	}
+	
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
-
+	memcpy(newpage, parent_page, PGSIZE);												// SJ, newpage에다가 parent_page를 복사해서 넣는다. PGSIZE(4KB)만큼
+	writable = is_writable(pte);														// SJ, 1 = read/write, 0 = read-only. 즉 true(1)이면 writable
+	
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
-	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
+	if (!pml4_set_page (current->pml4, va, newpage, writable)) {						// SJ, writable한 현재 쓰레드(자식 쓰레드)의 페이지 테이블에 newpage를 추가한다.
 		/* 6. TODO: if fail to insert page, do error handling. */
+		// printf("Failed to map user virtual page to given physical frame\n");
+		return false;
 	}
 	return true;
 }
@@ -162,24 +193,25 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 static void
 __do_fork (void *aux) {
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
-	struct thread *current = thread_current ();
+	struct thread *parent = (struct thread *) aux;										// SJ, thread_create에서 보조 인자로 parent_thread를 보내주었다. 즉 aux는 parent_thread이다.
+	struct thread *child_thread = thread_current ();											// SJ, 현재 쓰레드는 자식 쓰레드이다.
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
+	struct intr_frame *parent_if = &parent->parent_if;
 	bool succ = true;
 
 	/* 1. Read the cpu context to local stack. */
-	memcpy (&if_, parent_if, sizeof (struct intr_frame));
+	memcpy (&if_, parent_if, sizeof (struct intr_frame));								// SJ, 부모의 인터럽트 프레임을 그대로 복사한다.
+	if_.R.rax = 0;																		// SJ, fork 함수의 결과로 자식 쓰레드는 0을 반환해야 한다. 즉 자식 프로세스는 fork() = 0이 되어야 한다.
 
 	/* 2. Duplicate PT */
-	current->pml4 = pml4_create();
-	if (current->pml4 == NULL)
+	child_thread->pml4 = pml4_create();
+	if (child_thread->pml4 == NULL)
 		goto error;
 
-	process_activate (current);
+	process_activate (child_thread);
 #ifdef VM
-	supplemental_page_table_init (&current->spt);
-	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
+	supplemental_page_table_init (&child_thread->spt);
+	if (!supplemental_page_table_copy (&child_thread->spt, &parent->spt))
 		goto error;
 #else
 	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
@@ -191,14 +223,34 @@ __do_fork (void *aux) {
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
+	
+	// SJ, 부모 파일 테이블을 복사한다.
+	child_thread->fd_table[0] = parent->fd_table[0];
+	child_thread->fd_table[1] = parent->fd_table[1];
+	
+	for (int i = 2; i < FDT_COUNT_LIMIT; i++) {											
+		struct file *file = parent->fd_table[i];
+		
+		if (file == NULL) {																// SJ, 파일이 없을 경우 생략한다.
+			continue;
+		}
+		
+		child_thread->fd_table[i] = file_duplicate(file);									// SJ, Duplicate the file object including attributes and returns a new file for the same inode as FILE. Returns a null pointer if unsuccessful.
+																						// SJ, 파일을 복사해서 새로운 파일을 반환해준다.
+	}
+	child_thread->fd = parent->fd;															// SJ, 두 쓰레드의 파일 식별자를 같게 만들어준다.
 
+	sema_up(&child_thread->fork_sema);
 	process_init ();
 
 	/* Finally, switch to the newly created process. */
 	if (succ)
 		do_iret (&if_);
 error:
-	thread_exit ();
+	child_thread->exit_status = TID_ERROR;													// SJ, 자식 쓰레드가 비정상적으로 종료되었음을 알린다.
+	sema_up(&child_thread->fork_sema);														// SJ, 에러가 떠 비정상적으로 종료되니 세마도 풀어준다.
+	exit(TID_ERROR);																	// SJ, 에러로 인해 종료되었음을 알린다.
+	// thread_exit ();
 }
 
 /* Switch the current execution context to the f_name.
@@ -234,7 +286,7 @@ process_exec (void *f_name) {
 
 	/* And then load the binary */
 	success = load (file_name, &_if);
-
+	
     if (!success)
     {
         palloc_free_page(file_name);
@@ -271,8 +323,19 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	for(int i = 0; i < 1000000; i++) {};
-	return -1;
+	struct thread *current_thread = thread_current();
+	struct thread *child_thread = get_child_with_tid(child_tid);
+	
+	if (child_thread == NULL) {
+		return -1;
+	}
+	
+	sema_down(&child_thread->wait_sema);
+	int exit_status = child_thread->exit_status;
+	list_remove(&child_thread->child_elem);
+	sema_up(&child_thread->free_sema);
+	
+	return exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -283,8 +346,24 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
-
+	
+	// if (curr->running_file) {
+	// 	close(&curr->running_file);
+	// }
+	
+	file_close(curr->running_file);
+	// palloc_free_page(curr->running_file);
+	
+	for (int i = 0; i < FDT_COUNT_LIMIT; i++) {
+		close(i);
+		// printf("##### close #####\n");
+		// curr->fd_table[i] = NULL;
+	}
+	palloc_free_multiple(curr->fd_table, FDT_PAGES);
 	process_cleanup ();
+	
+	sema_up(&curr->wait_sema);
+	sema_down(&curr->free_sema);
 }
 
 /* Free the current process's resources. */
@@ -410,7 +489,7 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	}
 	
-	t->running_file = file;
+	
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -488,10 +567,13 @@ load (const char *file_name, struct intr_frame *if_) {
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 
 	success = true;
+	
+	t->running_file = file;
+	file_deny_write(file);
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	// file_close (file);
 	return success;
 }
 
@@ -707,3 +789,20 @@ setup_stack (struct intr_frame *if_) {
 	return success;
 }
 #endif /* VM */
+
+
+struct thread *get_child_with_tid(int tid) {
+	struct thread *parent_thread = thread_current();						// SJ, 현재 쓰레드
+	struct list *child_list = &parent_thread->child_list;					// SJ, 현재 쓰레드의 자식 쓰레드들 리스트
+	struct list_elem *search_node;											
+	
+	for (search_node = list_begin(child_list); search_node != list_end(child_list); search_node = list_next(search_node)) {
+		struct thread *child_thread = list_entry(search_node, struct thread, child_elem);
+		
+		if (child_thread->tid == tid) {										// SJ, 찾으려는 자식 쓰레드가 발견되면 그 자식 쓰레드를 반환한다.
+			return child_thread;
+		}
+	}
+	
+	return NULL;															// SJ, 못 찾으면 NULL 포인터 반환
+}

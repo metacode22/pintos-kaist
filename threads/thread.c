@@ -253,6 +253,7 @@ thread_create (const char *name, int priority,
 	t->fd_table[0] = 1;										// SJ, Dummy Value
 	t->fd_table[1] = 2;										// SJ, Dummy Value
 	
+	list_push_back(&thread_current()->child_list, &t->child_elem); // SJ, 현재 쓰레드는 부모 쓰레드이다. 부모 쓰레드의 자식 리스트에, 지금 만들고 있는 쓰레드(자식 쓰레드)를 추가한다.
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -266,22 +267,24 @@ thread_create (const char *name, int priority,
 	t->tf.eflags = FLAG_IF;
 
 	/* Add to run queue. */
-	struct thread *current_thread = thread_current();		// SJ, CPU가 비어있더라도, 즉 thread_current()가 NULL로 반환되더라도, else문을 만나, 새로운 쓰레드는 ready_list에 들어갔다가 yield가 된다.
+	// struct thread *current_thread = thread_current();		// SJ, CPU가 비어있더라도, 즉 thread_current()가 NULL로 반환되더라도, else문을 만나, 새로운 쓰레드는 ready_list에 들어갔다가 yield가 된다.
 
-	old_level = intr_disable ();							// SJ, 현재 인터럽트 값 저장
-	t->status = THREAD_READY;
+	// old_level = intr_disable ();							// SJ, 현재 인터럽트 값 저장
+	// list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
+	// t->status = THREAD_READY;
+	thread_unblock(t);
 	if (!list_empty(&ready_list)) {							// SJ, ready_list가 비어있지 않다면, ready_list에 넣고 yield할지 말지 판단한다.
-		list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
+		// list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
 		test_max_priority();
 		
 	} else {												// SJ, ready_list가 비어있다면, ready_list에 넣고 yield하여 CPU에 올라가도록 한다.
-		list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
+		// list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
 		thread_yield();
 	}
 	
-	// thread_unblock(current_thread);							// SJ, 현재 쓰레드를 ready 상태로 바꾸고, ready_list에 넣는다.
+	// thread_unblock(t);		
 	// test_max_priority();									// SJ, ready_list에서 우선순위가 바뀌었을 수도 있으니(CPU에 담긴 것보다 ready_list의 맨 앞 쓰레드의 우선순위가 더 높을 수 있으니(방금 생성된 쓰레드)) 우선순위 비교해서 yield 시켜줘야 한다.
-	intr_set_level (old_level);								// SJ, 인터럽트 원복
+	// intr_set_level (old_level);								// SJ, 인터럽트 원복
 	
 	return tid;
 }
@@ -556,6 +559,15 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->init_priority = priority;				// SJ, 원래 자신의 우선순위로 돌아오려면 원래 자신의 우선순위를 저장해두어야 한다.
 	t->wait_on_lock = NULL;						// SJ, 쓰레드가 기다리는 락은 처음엔 없을 것이다. lock_acquire(lock)을 통해 lock을 얻게 되는데, 이 때 lock을 얻지 못하면 이 쓰레드의 wait_on_lock에 그 lock이 저장된다.
 	list_init(&t->donations);					// SJ, donations을 초기화한다.
+	
+	list_init(&t->child_list);					// SJ, 자식 쓰레드 리스트를 초기화한다.
+	
+	t->exit_status = 0;
+	sema_init(&t->fork_sema, 0);
+	sema_init(&t->wait_sema, 0);
+	sema_init(&t->free_sema, 0);
+	
+	t->running_file = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

@@ -96,7 +96,7 @@ uint64_t *
 pml4_create (void) {
 	uint64_t *pml4 = palloc_get_page (0);
 	if (pml4)
-		memcpy (pml4, base_pml4, PGSIZE);
+		memcpy (pml4, base_pml4, PGSIZE);							// SJ, base_pml4는 init.c의 paging_init에서 페이지를 할당 받는다.
 	return pml4;
 }
 

@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "include/threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -109,10 +110,18 @@ struct thread {
 	
 	int exit_status;
 	
-	struct file **fd_table;				// SJ, file descriptor table 선언
 	int fd;								// SJ, file descriptor
+	struct file **fd_table;				// SJ, file descriptor table 선언	
 	
-	struct file *running_file;				// SJ, 현재 쓰레드가 사용 중인 파일
+	struct file *running_file;			// SJ, 현재 쓰레드가 사용 중인 파일
+	
+	struct list child_list;				// SJ, 해당 쓰레드의 자식 쓰레드들
+	struct list_elem child_elem;		// SJ, 쓰레드들을 연결하기 위한 구조체
+	struct intr_frame parent_if;		// SJ, 부모의 인터럽트 프레임, 이 쓰레드가 자식 쓰레드라면 부모 쓰레드의 정보를 저장하고 있는다.
+	
+	struct semaphore fork_sema;
+	struct semaphore wait_sema;
+	struct semaphore free_sema;
 	
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
