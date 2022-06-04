@@ -139,6 +139,8 @@ page_fault (struct intr_frame *f) {
 	not_present = (f->error_code & PF_P) == 0;
 	write = (f->error_code & PF_W) != 0;
 	user = (f->error_code & PF_U) != 0;
+	
+	exit(-1);
 
 #ifdef VM
 	/* For project 3 and later. */
@@ -146,6 +148,8 @@ page_fault (struct intr_frame *f) {
 		return;
 #endif
 
+	// exit(-1);
+	
 	/* Count page faults. */
 	page_fault_cnt++;
 
@@ -155,8 +159,8 @@ page_fault (struct intr_frame *f) {
 			not_present ? "not present" : "rights violation",
 			write ? "writing" : "reading",
 			user ? "user" : "kernel");
-	// kill (f);			
-	exit(-1);						// SJ, stack pointer인 rsp가 가르키는 주소가 page fault를 유발할 경우, exit(-1) 시스템 콜을 호출하도록 수정.
+	kill (f);			
+	// exit(-1);						// SJ, stack pointer인 rsp가 가르키는 주소가 page fault를 유발할 경우, exit(-1) 시스템 콜을 호출하도록 수정.
 									// SJ, rsp 주소를 임의의 위치로 변경하는 테스트 등에서 pass를 받기 위해 필요하다.
 }
 

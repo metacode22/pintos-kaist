@@ -5,10 +5,12 @@
 #include "threads/thread.h"
 #include "threads/loader.h"
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
 #include "include/filesys/filesys.h"
 #include "threads/init.h"
+#include "threads/palloc.h"
 #include "include/lib/stdio.h"
 #include "include/filesys/file.h"
 
@@ -17,7 +19,6 @@ void syscall_handler (struct intr_frame *);
 void check_address (void *addr);
 void halt (void);
 void exit (int status);
-tid_t fork (const char *thread_name, struct intr_frame *f);
 bool create (const char *file, unsigned initial_size);
 bool remove (const char *file);
 int write (int fd, const void *buffer, unsigned size);
@@ -27,6 +28,9 @@ int read (int fd, void *buffer, unsigned size);
 void seek(int fd, unsigned position);
 unsigned tell (int fd);
 void close (int fd);
+tid_t fork (const char *thread_name, struct intr_frame *f);
+int wait (tid_t child_tid UNUSED);
+int exec (const char *cmd_line);
 
 int add_file_to_fd_table (struct file *file);
 struct file *get_file_from_fd_table (int fd);
@@ -109,6 +113,15 @@ syscall_handler (struct intr_frame *f UNUSED) {							// SJ, 시스템 콜이 �
 		case SYS_CLOSE:
 			close(f->R.rdi);
 			break;
+		case SYS_FORK:
+			f->R.rax = fork(f->R.rdi, f);
+			break;
+		case SYS_WAIT:
+			f->R.rax = wait(f->R.rdi);
+			break;
+		case SYS_EXEC:
+			f->R.rax = exec(f->R.rdi);
+			break;
 		default:
 			exit(-1);
 			break;
@@ -123,7 +136,7 @@ halt (void) {
 void
 exit (int status) {
     struct thread *current_thread = thread_current();
-    current_thread->exit_status = status;                         		// SJ, 종료시 상태를 확인, 정상종료면 state = 0
+    current_thread->exit_status = status;                         		// SJ, 종료시 상태를 확인, 정상종료면 status = 0
     printf("%s: exit(%d)\n", current_thread->name, status); 			// SJ, 종료 메시지 출력
     thread_exit();   
 }
@@ -132,6 +145,11 @@ bool
 create (const char *file, unsigned initial_size) {
 	check_address(file);
 	
+	// lock_acquire(&filesys_lock);
+	// bool result = filesys_create(file, initial_size);
+	// lock_release(&filesys_lock);
+	// return result;
+	
 	return filesys_create(file, initial_size);														// SJ, file 생성 성공 시 true를 반환한다.
 }
 
@@ -139,16 +157,22 @@ bool
 remove (const char *file) {
 	check_address(file);
 	
+	// lock_acquire(&filesys_lock);
+	// bool result = filesys_remove(file);
+	// lock_release(&filesys_lock);
+	// return result;
+	
 	return filesys_remove(file);														// SJ, file 제거 성공 시 true를 반환한다.
 }
 
 int 
 open (const char *file) {												// SJ, 디렉토리를 열어서? 디스크에서? 해당하는 파일을 찾아서, 그 파일만큼 메모리를 할당받고(filesys_open 안의 file_open에서 calloc) 파일 테이블에서 빈 fd에(add_file_to_fd_table) open한 파일을 배정시킨다.
+	check_address(file);
+	
 	if (file == NULL) {
 		return -1;
 	}
 	
-	check_address(file);
 	struct file *file_object = filesys_open(file);	
 			
 	if (file_object == NULL) {
@@ -158,9 +182,9 @@ open (const char *file) {												// SJ, 디렉토리를 열어서? 디스크
 	int fd = add_file_to_fd_table(file_object);							// SJ, 해당 프로세스의 fd_table에서 빈 fd를 찾고 file을 배정시킨다. 프로세스(쓰레드)는 이 파일을 이용할 수 있게 된다.
 	
 	if (fd == -1) {
-		lock_acquire(&filesys_lock);
+		// lock_acquire(&filesys_lock);
 		file_close(file_object);										// SJ, inode close하고 file이 할당 받은 메모리를 해제한다.
-		lock_release(&filesys_lock);
+		// lock_release(&filesys_lock);
 	}
 	
 	return fd;															// SJ, 실패했으면 -1을 반환할 것이다.
@@ -194,16 +218,16 @@ read (int fd, void *buffer, unsigned size) {		// SJ, fd로부터 size만큼 읽�
 		unsigned char *buf = buffer;				// SJ, 주소값에는 음수가 없다. 그리고 문자열에 접근할 때는 unsigned를 사용한다. 그냥 buffer를 그대로 쓰면, 나중에 buffer++하면서 주소값이 변할 수 있다. 즉 원본 buffer 주소를 나중에 쓸 수도 있는데, 원하는 처음 주소가 아닐 수도 있다.
 		char key;									// SJ, 한 글자 한 글자
 		
-		lock_acquire(&filesys_lock);
+		// lock_acquire(&filesys_lock);
 		for (read_count = 0; read_count < size; read_count++) {			
-			key = input_getc();						// SJ, 불릴 때마다 하나씩 옮겨가면서 읽어온다.
+			key = input_getc();						// SJ, 불릴 때마다 하나씩 옮겨가면서 읽어온다. intr_disable을 통해 인터럽트를 무시하고 있다. 즉 input_getc 함수 자체적으로 동기화를 구현하고 있다.
 			*buf++ = key;							// SJ, buf가 가르키는 곳에 key라는 문자열을 넣는다.
 			
 			if (key == '\0') {						// SJ, 마지막 문자를 만나면 넣는 것을 멈춘다.
 				break;
 			}
 		}
-		lock_release(&filesys_lock);
+		// lock_release(&filesys_lock);
 	}
 	
 	else {
@@ -228,9 +252,9 @@ write (int fd, const void *buffer, unsigned size) {						// SJ, buffer에서 siz
 	}
 	
 	else if (fd == STDOUT_FILENO) {										// SJ, 버퍼에 저장된 값을 화면에 출력해준다.
-		lock_acquire(&filesys_lock);
-		putbuf(buffer, size);			
-		lock_release(&filesys_lock);								
+		// lock_acquire(&filesys_lock);
+		putbuf(buffer, size);											// SJ, putbuf 함수 내부적으로 console에 대해 락이 구현되어 있다.
+		// lock_release(&filesys_lock);								
 		result = size;
 	}
 	
@@ -269,6 +293,7 @@ tell (int fd) {
 void
 close (int fd) {
 	if (fd <= 1) {
+		// close_file_from_fd_table(fd);
 		return;
 	}
 	
@@ -279,26 +304,45 @@ close (int fd) {
 	}
 	
 	close_file_from_fd_table(fd);						// SJ, 파일 테이블에서 닫는 것, 없애는 것, 해당 프로세스에서 해당 파일을 관리안하겠다.
-	file_close(file);									// SJ, 
+	file_close(file);									 
 }
 
+tid_t 
+fork (const char *thread_name, struct intr_frame *f UNUSED) {
+	tid_t tid = process_fork(thread_name, f);
+	
+	return tid; 
+}
+
+
+
+int
+wait (tid_t child_tid UNUSED) {							// SJ, 부모 프로세스는 자식 프로세스인 child_tid가 종료되길 기다린다. 그리고 자식의 종료 상태(어떻게 종료되었는지)를 검색한다.
+	return process_wait(child_tid);						// SJ, 만약 child_tid가 살아있다면 child_tid가 제거될 때까지 기다린다. child_tid가 종료되면 종료된 상태를 반환한다.
+}														// SJ, child_tid가 exit을 부른 것이 아니라, kernel에 의해 제거되었다면 -1을 반환한다.
+														// SJ, 부모 프로세스는 이미 종료된 프로세스에 대해 wait을 할 수 있다.(자식이 종료되었는지 부모가 모를 수도 있어서 그런가?) 이 때는 종료된 자식이 어떻게 종료되었는지 exit_status를 반환한다.
+														// SJ, 자식 프로세스가 종료되면 부모 프로세스는 자식 프로세스의 파일 디스크립터 할당을 해제해야 한다.	
+														// SJ, child_tid에 대해 이미 wait을 호출했는데 또 wait을 호출한다면, 혹은 child_tid가 부모 프로세스의 자식이 아니라면 -1을 반환한다.
+														
+int exec (const char *file_name) {
+	check_address(file_name);
+
+	int file_size = strlen(file_name) + 1;
+	char *fn_copy = palloc_get_page(PAL_ZERO);
+	if (!fn_copy) {
+		exit(-1);
+		return -1;
+	}
+	strlcpy(fn_copy, file_name, file_size);
+	if (process_exec(fn_copy) == -1) {
+		exit(-1);
+		return -1;
+	}
+}				
+								
 // SJ, file descriptor table 관련 helper functions
 int 
 add_file_to_fd_table (struct file *file) {
-	// struct thread *curr = thread_current();
-	// struct file **fdt = curr->fd_table;
-
-	// while (curr->fd < 10 && fdt[curr->fd]) {
-	// 	curr->fd++;
-	// }
-
-	// if (curr->fd >= 10) {
-	// 	return -1;
-	// }
-
-	// fdt[curr->fd] = file;
-	// return curr->fd;
-	
 	struct thread *current_thread = thread_current();
 	struct file **fd_table = current_thread->fd_table;
 	
